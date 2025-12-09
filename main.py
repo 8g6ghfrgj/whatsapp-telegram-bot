@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-البوت الرئيسي - WhatsApp Bot
-إدارة حسابات WhatsApp عبر Telegram مع جميع الميزات المطلوبة
-"""
 
 import os
 import asyncio
@@ -35,7 +31,6 @@ from utils import (
     format_stats
 )
 
-# إعداد السجل
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -46,7 +41,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# حالات المحادثة
 (
     MAIN_MENU,
     MANAGE_ACCOUNTS,
@@ -61,16 +55,13 @@ logger = logging.getLogger(__name__)
 
 class WhatsAppBot:
     def __init__(self):
-        """تهيئة البوت"""
         self.config = Config()
         self.db = WhatsAppDatabase()
         
-        # إدارة الحسابات
         self.whatsapp_managers = {}
         self.current_account = "default"
         self.user_sessions = {}
         
-        # الجدولة
         self.scheduler = JoinScheduler(self.db, self, 
                                       self.config.MAX_JOIN_PER_BATCH,
                                       self.config.JOIN_DELAY_SECONDS)
@@ -78,14 +69,12 @@ class WhatsAppBot:
         self.application = None
         self.running = False
         
-        # معالجة الإشارات
         signal.signal(signal.SIGINT, self.shutdown)
         signal.signal(signal.SIGTERM, self.shutdown)
         
         logger.info("🤖 تم تهيئة بوت WhatsApp")
     
-    def get_whatsapp_manager(self, account_name: str = None) -> WhatsAppManager:
-        """الحصول على مدير واتساب للحساب"""
+    def get_whatsapp_manager(self, account_name: str = None):
         if not account_name:
             account_name = self.current_account
         
@@ -104,27 +93,19 @@ class WhatsAppBot:
         return self.whatsapp_managers.get(account_name)
     
     def get_admin_id(self) -> int:
-        """الحصول على معرف المسؤول"""
-        # يمكنك تغيير هذا ليكون معرف المستخدم الخاص بك
         return int(os.environ.get("ADMIN_USER_ID", 0))
     
-    # ========== معالجات الأوامر ==========
-    
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """بدء البوت"""
         user_id = update.effective_user.id
         
-        # إنشاء جلسة المستخدم
         self.user_sessions[user_id] = {
             'current_account': self.current_account,
             'state': 'main_menu'
         }
         
-        # التحقق من أن الجدولة تعمل
         if not self.scheduler.running:
             self.scheduler.start()
         
-        # القائمة الرئيسية
         keyboard = [
             [InlineKeyboardButton("📱 إدارة الحسابات", callback_data="manage_accounts")],
             [InlineKeyboardButton("🔗 تجميع الروابط", callback_data="collect_links")],
@@ -136,7 +117,6 @@ class WhatsAppBot:
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        # رسالة الترحيب
         welcome_msg = (
             "🤖 *مرحباً بك في بوت WhatsApp المتقدم*\n\n"
             "🎯 *المميزات المتوفرة:*\n"
@@ -157,14 +137,11 @@ class WhatsAppBot:
         return MAIN_MENU
     
     async def manage_accounts(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """إدارة الحسابات"""
         query = update.callback_query
         await query.answer()
         
-        # الحصول على جميع الحسابات
         accounts = self.db.get_all_accounts()
         
-        # إنشاء لوحة المفاتيح
         keyboard = []
         for account in accounts:
             account_name = account['name']
@@ -195,21 +172,18 @@ class WhatsAppBot:
         return MANAGE_ACCOUNTS
     
     async def select_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """اختيار حساب"""
         query = update.callback_query
         await query.answer()
         
         data = query.data
         account_name = data.replace("select_account_", "")
         
-        # تحديث الحساب الحالي
         self.current_account = account_name
         self.db.update_account_status(
             self.db.get_account(name=account_name)['id'],
             'active'
         )
         
-        # تحديث جلسة المستخدم
         user_id = query.from_user.id
         if user_id in self.user_sessions:
             self.user_sessions[user_id]['current_account'] = account_name
@@ -222,14 +196,12 @@ class WhatsAppBot:
         return await self.back_to_main(update, context)
     
     async def connect_account(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """ربط حساب واتساب"""
         query = update.callback_query
         await query.answer()
         
         data = query.data
         account_name = data.replace("connect_account_", "")
         
-        # الحصول على مدير الحساب
         manager = self.get_whatsapp_manager(account_name)
         if not manager:
             await query.edit_message_text(
@@ -238,7 +210,6 @@ class WhatsAppBot:
             )
             return MANAGE_ACCOUNTS
         
-        # التحقق إذا كان الحساب مربوطاً بالفعل
         if manager.is_logged_in:
             await query.edit_message_text(
                 f"✅ الحساب *{account_name}* مربوط بالفعل!",
@@ -246,7 +217,6 @@ class WhatsAppBot:
             )
             return MANAGE_ACCOUNTS
         
-        # الحصول على QR Code
         await query.edit_message_text(
             f"⏳ جاري تحضير QR Code للحساب *{account_name}*...",
             parse_mode='Markdown'
@@ -261,7 +231,6 @@ class WhatsAppBot:
             return MANAGE_ACCOUNTS
         
         try:
-            # إرسال صورة QR Code
             await query.message.reply_photo(
                 photo=base64.b64decode(qr_code),
                 caption=f"📱 *QR Code لحساب {account_name}*\n\n"
@@ -274,7 +243,6 @@ class WhatsAppBot:
                 parse_mode='Markdown'
             )
             
-            # بدء التحقق الدوري من حالة الدخول
             asyncio.create_task(self._check_login_status(manager, account_name, query.from_user.id))
             
             await query.edit_message_text(
@@ -293,8 +261,7 @@ class WhatsAppBot:
             return MANAGE_ACCOUNTS
     
     async def _check_login_status(self, manager: WhatsAppManager, account_name: str, user_id: int):
-        """التحقق الدوري من حالة الدخول"""
-        for _ in range(60):  # 60 محاولة (5 دقائق)
+        for _ in range(60):
             if manager.check_login_status():
                 try:
                     await self.application.bot.send_message(
@@ -303,7 +270,6 @@ class WhatsAppBot:
                         parse_mode='Markdown'
                     )
                     
-                    # تحديث حالة الحساب في قاعدة البيانات
                     account = self.db.get_account(name=account_name)
                     if account:
                         self.db.update_account_status(account['id'], 'active')
@@ -312,14 +278,12 @@ class WhatsAppBot:
                     logger.error(f"❌ خطأ في إرسال إشعار النجاح: {e}")
                 break
             
-            await asyncio.sleep(5)  # الانتظار 5 ثواني بين المحاولات
+            await asyncio.sleep(5)
     
     async def collect_links(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """تجميع الروابط من المجموعات"""
         query = update.callback_query
         await query.answer()
         
-        # التحقق من أن الحساب مربوط
         manager = self.get_whatsapp_manager()
         if not manager or not manager.is_logged_in:
             await query.edit_message_text(
@@ -334,7 +298,6 @@ class WhatsAppBot:
             parse_mode='Markdown'
         )
         
-        # تجميع الروابط
         links_data = manager.collect_links_from_groups(self.config.MAX_GROUPS_TO_SCAN)
         
         if not links_data['total_checked']:
@@ -344,7 +307,6 @@ class WhatsAppBot:
             )
             return MAIN_MENU
         
-        # حفظ الروابط في قاعدة البيانات
         account = self.db.get_account(name=self.current_account)
         if not account:
             await query.edit_message_text(
@@ -355,22 +317,18 @@ class WhatsAppBot:
         
         account_id = account['id']
         
-        # حفظ روابط WhatsApp
         whatsapp_count = 0
         for link in links_data['whatsapp']:
             if self.db.add_collected_link(account_id, link, 'whatsapp', 'auto-collected'):
                 whatsapp_count += 1
         
-        # حفظ روابط Telegram
         telegram_count = 0
         for link in links_data['telegram']:
             if self.db.add_collected_link(account_id, link, 'telegram', 'auto-collected'):
                 telegram_count += 1
         
-        # تحديث الإحصائيات
         self.db.update_statistics(account_id, 'links_collected', whatsapp_count + telegram_count)
         
-        # عرض النتائج
         result_msg = (
             f"✅ *تم تجميع الروابط بنجاح*\n\n"
             f"📊 *الإحصائيات:*\n"
@@ -397,14 +355,12 @@ class WhatsAppBot:
         return VIEW_LINKS
     
     async def view_links(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """عرض الروابط المجمعة"""
         query = update.callback_query
         await query.answer()
         
         data = query.data
         link_type = data.replace("view_links_", "")
         
-        # الحصول على الحساب الحالي
         account = self.db.get_account(name=self.current_account)
         if not account:
             await query.edit_message_text(
@@ -415,7 +371,6 @@ class WhatsAppBot:
         
         account_id = account['id']
         
-        # الحصول على الروابط
         if link_type == 'all':
             links = self.db.get_collected_links(account_id=account_id, limit=50)
             title = "جميع الروابط المجمعة"
@@ -430,7 +385,6 @@ class WhatsAppBot:
             )
             return VIEW_LINKS
         
-        # تنسيق الرسالة
         message = f"📋 *{title}* ({len(links)} رابط):\n\n"
         
         for i, link in enumerate(links, 1):
@@ -438,7 +392,6 @@ class WhatsAppBot:
             source = link['source_group'] or "غير معروف"
             message += f"{i}. `{link_url}`\n   📍 المصدر: {source[:30]}\n\n"
         
-        # لوحة المفاتيح
         keyboard = [
             [InlineKeyboardButton("📱 روابط WhatsApp", callback_data="view_links_whatsapp")],
             [InlineKeyboardButton("📨 روابط Telegram", callback_data="view_links_telegram")],
@@ -448,7 +401,7 @@ class WhatsAppBot:
         ]
         
         await query.edit_message_text(
-            message[:4000],  # الحد الأقصى لطول الرسالة
+            message[:4000],
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='Markdown'
         )
@@ -456,7 +409,6 @@ class WhatsAppBot:
         return VIEW_LINKS
     
     async def join_groups(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """الانضمام للمجموعات"""
         query = update.callback_query
         await query.answer()
         
@@ -473,10 +425,8 @@ class WhatsAppBot:
         return JOIN_GROUPS
     
     async def process_join_links(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """معالجة روابط الانضمام"""
         text = update.message.text
         
-        # استخراج الروابط
         whatsapp_links, telegram_links, other_links = extract_links_from_text(text)
         
         if not whatsapp_links:
@@ -486,7 +436,6 @@ class WhatsAppBot:
             )
             return JOIN_GROUPS
         
-        # الحصول على الحساب الحالي
         account = self.db.get_account(name=self.current_account)
         if not account:
             await update.message.reply_text(
@@ -498,10 +447,8 @@ class WhatsAppBot:
         account_id = account['id']
         account_name = account['name']
         
-        # إضافة الروابط لقائمة الانتظار
         result = self.scheduler.add_links_to_queue(account_id, whatsapp_links)
         
-        # رسالة النتيجة
         result_msg = (
             f"📥 *تمت إضافة الروابط لقائمة الانتظار*\n\n"
             f"📊 *النتائج:*\n"
@@ -520,7 +467,6 @@ class WhatsAppBot:
             parse_mode='Markdown'
         )
         
-        # إضافة إشعار
         if result['added'] > 0:
             notification_msg = (
                 f"📥 تمت إضافة {result['added']} رابط لقائمة انتظار الانضمام "
@@ -535,11 +481,9 @@ class WhatsAppBot:
         return JOIN_GROUPS
     
     async def queue_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """عرض حالة قائمة الانتظار"""
         query = update.callback_query
         await query.answer()
         
-        # الحصول على الحساب الحالي
         account = self.db.get_account(name=self.current_account)
         if not account:
             await query.edit_message_text(
@@ -550,15 +494,12 @@ class WhatsAppBot:
         
         account_id = account['id']
         
-        # الحصول على إحصائيات قائمة الانتظار
         queue_stats = self.scheduler.get_queue_status(account_id)
         
-        # الحصول على إحصائيات عامة
         links_count = self.db.get_links_count(account_id)
         whatsapp_count = self.db.get_links_count(account_id, 'whatsapp')
         telegram_count = self.db.get_links_count(account_id, 'telegram')
         
-        # رسالة الحالة
         status_msg = (
             f"📊 *حالة البوت*\n\n"
             f"👤 *الحساب:* {self.current_account}\n\n"
@@ -594,14 +535,12 @@ class WhatsAppBot:
         return MANAGE_QUEUE
     
     async def clear_queue(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """مسح قائمة الانتظار"""
         query = update.callback_query
         await query.answer()
         
         data = query.data
-        status = data.replace("clear_", "")  # completed أو failed
+        status = data.replace("clear_", "")
         
-        # الحصول على الحساب الحالي
         account = self.db.get_account(name=self.current_account)
         if not account:
             await query.edit_message_text(
@@ -612,7 +551,6 @@ class WhatsAppBot:
         
         account_id = account['id']
         
-        # مسح القائمة
         if self.scheduler.clear_queue(account_id, status):
             await query.edit_message_text(
                 f"✅ تم مسح المهام {status} من قائمة الانتظار",
@@ -626,42 +564,10 @@ class WhatsAppBot:
         
         return await self.queue_status(update, context)
     
-    async def send_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """إرسال رسائل للمجموعات"""
-        query = update.callback_query
-        await query.answer()
-        
-        await query.edit_message_text(
-            "📨 *إرسال رسالة للمجموعات*\n\n"
-            "يمكنك:\n"
-            "1. إرسال رسالة لجميع المجموعات\n"
-            "2. إرسال رسالة لمجموعات محددة\n"
-            "3. إدارة الرسائل المحفوظة\n\n"
-            "اختر الإجراء:",
-            parse_mode='Markdown'
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton("📝 كتابة رسالة جديدة", callback_data="compose_message")],
-            [InlineKeyboardButton("📋 الرسائل المحفوظة", callback_data="saved_messages")],
-            [InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")]
-        ]
-        
-        await query.edit_message_text(
-            "📨 *إرسال الرسائل*\n\n"
-            "اختر الإجراء المناسب:",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='Markdown'
-        )
-        
-        return SEND_MESSAGES
-    
     async def back_to_main(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """العودة للقائمة الرئيسية"""
         query = update.callback_query
         await query.answer()
         
-        # القائمة الرئيسية
         keyboard = [
             [InlineKeyboardButton("📱 إدارة الحسابات", callback_data="manage_accounts")],
             [InlineKeyboardButton("🔗 تجميع الروابط", callback_data="collect_links")],
@@ -671,7 +577,6 @@ class WhatsAppBot:
             [InlineKeyboardButton("⚙️ الإعدادات", callback_data="settings")]
         ]
         
-        # الحصول على حالة الحساب
         manager = self.get_whatsapp_manager()
         account_status = "🔴 غير مرتبط"
         if manager and manager.is_logged_in:
@@ -693,10 +598,8 @@ class WhatsAppBot:
         return MAIN_MENU
     
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """إلغاء العملية الحالية"""
         user_id = update.effective_user.id
         
-        # مسح جلسة المستخدم
         if user_id in self.user_sessions:
             self.user_sessions[user_id].clear()
         
@@ -708,8 +611,6 @@ class WhatsAppBot:
         return ConversationHandler.END
     
     def setup_handlers(self):
-        """إعداد معالجات البوت"""
-        # معالج المحادثة الرئيسي
         conv_handler = ConversationHandler(
             entry_points=[CommandHandler("start", self.start)],
             states={
@@ -756,20 +657,13 @@ class WhatsAppBot:
         
         self.application.add_handler(conv_handler)
         
-        # معالج الإشعارات
         self.application.add_handler(CommandHandler("notifications", self.show_notifications))
-        
-        # معالج الإحصائيات
         self.application.add_handler(CommandHandler("stats", self.show_stats))
-        
-        # معالج المساعدة
         self.application.add_handler(CommandHandler("help", self.show_help))
     
     async def show_notifications(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """عرض الإشعارات"""
         user_id = update.effective_user.id
         
-        # الحصول على الإشعارات غير المقروءة
         notifications = self.db.get_unread_notifications(user_id)
         
         if not notifications:
@@ -779,13 +673,10 @@ class WhatsAppBot:
             )
             return
         
-        # عرض الإشعارات
         message = "📢 *الإشعارات غير المقروءة:*\n\n"
         
         for i, notification in enumerate(notifications, 1):
             message += f"{i}. {notification['message']}\n"
-            
-            # تحديد الإشعار كمقروء
             self.db.mark_notification_read(notification['id'])
         
         await update.message.reply_text(
@@ -794,8 +685,6 @@ class WhatsAppBot:
         )
     
     async def show_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """عرض الإحصائيات"""
-        # الحصول على الحساب الحالي
         account = self.db.get_account(name=self.current_account)
         if not account:
             await update.message.reply_text(
@@ -806,10 +695,8 @@ class WhatsAppBot:
         
         account_id = account['id']
         
-        # الحصول على إحصائيات قائمة الانتظار
         queue_stats = self.scheduler.get_queue_status(account_id)
         
-        # إعداد الرسالة
         stats_msg = format_stats(queue_stats)
         
         await update.message.reply_text(
@@ -818,7 +705,6 @@ class WhatsAppBot:
         )
     
     async def show_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """عرض رسالة المساعدة"""
         help_msg = (
             "📚 *دليل استخدام البوت*\n\n"
             "🎯 *الأوامر المتاحة:*\n"
@@ -846,7 +732,6 @@ class WhatsAppBot:
         )
     
     async def settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-        """إعدادات البوت"""
         query = update.callback_query
         await query.answer()
         
@@ -876,22 +761,17 @@ class WhatsAppBot:
         return SETTINGS
     
     def run(self):
-        """تشغيل البوت"""
         if not self.config.BOT_TOKEN:
             logger.error("❌ BOT_TOKEN غير معرف!")
             print("❌ الرجاء تعيين BOT_TOKEN في متغيرات البيئة")
             sys.exit(1)
         
-        # إنشاء تطبيق Telegram
         self.application = Application.builder().token(self.config.BOT_TOKEN).build()
         
-        # إعداد المعالجات
         self.setup_handlers()
         
-        # بدء الجدولة
         self.scheduler.start()
         
-        # تشغيل البوت
         logger.info("🤖 بدء تشغيل البوت...")
         self.running = True
         
@@ -903,24 +783,20 @@ class WhatsAppBot:
             self.shutdown(None, None)
     
     def shutdown(self, signum, frame):
-        """إيقاف البوت"""
         if not self.running:
             return
         
         logger.info("🛑 إيقاف البوت...")
         self.running = False
         
-        # إيقاف الجدولة
         self.scheduler.stop()
         
-        # إغلاق مديري واتساب
         for account_name, manager in self.whatsapp_managers.items():
             try:
                 manager.close()
             except Exception as e:
                 logger.error(f"❌ خطأ في إغلاق مدير {account_name}: {e}")
         
-        # إغلاق قاعدة البيانات
         try:
             self.db.close()
         except Exception as e:
@@ -929,7 +805,6 @@ class WhatsAppBot:
         logger.info("✅ تم إيقاف البوت بنجاح")
         sys.exit(0)
 
-# نقطة الدخول الرئيسية
 if __name__ == "__main__":
     bot = WhatsAppBot()
     bot.run()
