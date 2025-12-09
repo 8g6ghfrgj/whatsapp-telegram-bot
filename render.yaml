@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: whatsapp-bot
+    name: whatsapp-bot-telethon
     env: python
     region: frankfurt
     buildCommand: |
@@ -10,17 +10,21 @@ services:
     envVars:
       - key: BOT_TOKEN
         sync: false
-      - key: SESSION_DIR
-        value: /tmp/whatsapp_session
+        value: YOUR_BOT_TOKEN_HERE
+      - key: API_ID
+        sync: false
+        value: YOUR_API_ID
+      - key: API_HASH
+        sync: false
+        value: YOUR_API_HASH
+      - key: PHONE_NUMBER
+        sync: false
+        value: YOUR_PHONE_NUMBER
+      - key: SESSION_FILE
+        value: whatsapp_session.session
       - key: DATABASE_FILE
         value: whatsapp_bot.db
       - key: MAX_JOIN_PER_BATCH
-        value: 5
+        value: "5"
       - key: JOIN_DELAY_SECONDS
-        value: 300
-      - key: MAX_GROUPS_TO_SCAN
-        value: 100
-      - key: NOTIFY_ON_FAILURE
-        value: true
-      - key: DISPLAY
-        value: :99
+        value: "300"
