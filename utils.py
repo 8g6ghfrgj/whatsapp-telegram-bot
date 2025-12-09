@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-أدوات مساعدة للبوت
-"""
 
 import re
 import logging
-from datetime import datetime
-from typing import List, Tuple, Optional
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 
 def validate_whatsapp_link(link: str) -> bool:
-    """التحقق من صحة رابط واتساب"""
     whatsapp_patterns = [
         r'^https?://chat\.whatsapp\.com/[A-Za-z0-9]+$',
         r'^https?://wa\.me/\d+',
@@ -26,7 +20,6 @@ def validate_whatsapp_link(link: str) -> bool:
     return False
 
 def validate_telegram_link(link: str) -> bool:
-    """التحقق من صحة رابط تليجرام"""
     telegram_patterns = [
         r'^https?://t\.me/[A-Za-z0-9_]+$',
         r'^https?://telegram\.me/[A-Za-z0-9_]+$',
@@ -38,13 +31,11 @@ def validate_telegram_link(link: str) -> bool:
             return True
     return False
 
-def extract_links_from_text(text: str) -> Tuple[List[str], List[str]]:
-    """استخراج الروابط من النص"""
+def extract_links_from_text(text: str):
     whatsapp_links = []
     telegram_links = []
     other_links = []
     
-    # البحث عن جميع الروابط في النص
     url_pattern = r'https?://[^\s]+'
     links = re.findall(url_pattern, text)
     
@@ -59,7 +50,6 @@ def extract_links_from_text(text: str) -> Tuple[List[str], List[str]]:
     return whatsapp_links, telegram_links, other_links
 
 def format_time(seconds: int) -> str:
-    """تنسيق الوقت بالثواني"""
     if seconds < 60:
         return f"{seconds} ثانية"
     elif seconds < 3600:
@@ -70,10 +60,7 @@ def format_time(seconds: int) -> str:
         minutes = (seconds % 3600) // 60
         return f"{hours} ساعة و {minutes} دقيقة"
 
-def create_keyboard(buttons_data: List[List[Tuple[str, str]]], 
-                    back_button: bool = True, 
-                    back_data: str = "back_to_main") -> InlineKeyboardMarkup:
-    """إنشاء لوحة مفاتيح إنلاين"""
+def create_keyboard(buttons_data, back_button: bool = True, back_data: str = "back_to_main"):
     keyboard = []
     
     for row in buttons_data:
@@ -87,50 +74,7 @@ def create_keyboard(buttons_data: List[List[Tuple[str, str]]],
     
     return InlineKeyboardMarkup(keyboard)
 
-def create_pagination_keyboard(current_page: int, total_pages: int, 
-                               prefix: str, data: List) -> InlineKeyboardMarkup:
-    """إنشاء لوحة مفاتيح مع ترقيم الصفحات"""
-    keyboard = []
-    
-    # إضافة البيانات للصفحة الحالية
-    start_idx = current_page * 10
-    end_idx = min(start_idx + 10, len(data))
-    
-    for i in range(start_idx, end_idx):
-        item = data[i]
-        keyboard.append([
-            InlineKeyboardButton(
-                f"• {item.get('name', item.get('link', 'غير معروف'))[:30]}",
-                callback_data=f"{prefix}_{i}"
-            )
-        ])
-    
-    # أزرار التنقل بين الصفحات
-    nav_buttons = []
-    
-    if current_page > 0:
-        nav_buttons.append(
-            InlineKeyboardButton("◀️ السابق", callback_data=f"page_{prefix}_{current_page - 1}")
-        )
-    
-    nav_buttons.append(
-        InlineKeyboardButton(f"{current_page + 1}/{total_pages}", callback_data="current_page")
-    )
-    
-    if current_page < total_pages - 1:
-        nav_buttons.append(
-            InlineKeyboardButton("▶️ التالي", callback_data=f"page_{prefix}_{current_page + 1}")
-        )
-    
-    if nav_buttons:
-        keyboard.append(nav_buttons)
-    
-    keyboard.append([InlineKeyboardButton("🔙 رجوع", callback_data="back_to_main")])
-    
-    return InlineKeyboardMarkup(keyboard)
-
 def format_stats(stats: dict) -> str:
-    """تنسيق الإحصائيات"""
     message = "📊 *الإحصائيات*\n\n"
     
     if 'links_collected' in stats:
@@ -162,14 +106,12 @@ def format_stats(stats: dict) -> str:
     
     return message
 
-def split_message(message: str, max_length: int = 4000) -> List[str]:
-    """تقسيم الرسالة الطويلة إلى أجزاء"""
+def split_message(message: str, max_length: int = 4000):
     if len(message) <= max_length:
         return [message]
     
     parts = []
     while len(message) > max_length:
-        # البحث عن آخر مسافة قبل الحد الأقصى
         split_point = message[:max_length].rfind('\n')
         if split_point == -1:
             split_point = message[:max_length].rfind(' ')
@@ -183,17 +125,3 @@ def split_message(message: str, max_length: int = 4000) -> List[str]:
         parts.append(message)
     
     return parts
-
-def sanitize_filename(filename: str) -> str:
-    """تنظيف اسم الملف من الأحغير غير الآمنة"""
-    # إزالة الأحغير غير الآمنة
-    unsafe_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
-    for char in unsafe_chars:
-        filename = filename.replace(char, '_')
-    
-    # تقليل الطول
-    if len(filename) > 100:
-        name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
-        filename = name[:95] + '...' + ('.' + ext if ext else '')
-    
-    return filename
