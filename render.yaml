@@ -2,8 +2,10 @@ services:
   - type: web
     name: whatsapp-bot
     env: python
-    region: frankfurt  # أو أي منطقة تختارها
-    buildCommand: pip install -r requirements.txt
+    region: frankfurt
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
@@ -20,3 +22,5 @@ services:
         value: 100
       - key: NOTIFY_ON_FAILURE
         value: true
+      - key: DISPLAY
+        value: :99
