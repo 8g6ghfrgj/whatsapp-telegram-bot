@@ -1,40 +1,33 @@
-# Use Python slim as base
-FROM python:3.10-slim
+FROM python:3.11-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-
-# Install dependencies for Chromium + Chromedriver + fonts
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# تثبيت متطلبات النظام
+RUN apt-get update && apt-get install -y \
     wget \
-    ca-certificates \
     gnupg \
     unzip \
-    xvfb \
-    fonts-liberation \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libpangocairo-1.0-0 \
-    libxss1 \
-    libgtk-3-0 \
-    procps \
+    chromium \
+    chromium-driver \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chromium
-RUN apt-get update && apt-get install -y chromium && rm -rf /var/lib/apt/lists/*
+# إنشاء مجلد التطبيق
+WORKDIR /app
 
-# Install chromedriver that matches chromium package
-# On some distros chromedriver package exists; try apt-get chromedriver, otherwise install manually
-RUN apt-get update && apt-get install -y chromium-driver || true && rm -rf /var/lib/apt/lists/*
+# نسخ المتطلبات
+COPY requirements.txt .
 
+# تثبيت متطلبات Python
+RUN pip install --no-cache-dir -r requirements.txt
+
+# نسخ الكود
+COPY . .
+
+# تهيئة قاعدة البيانات
+RUN python -c "from database import WhatsAppDatabase; WhatsAppDatabase()"
+
+# تشغيل البوت
+CMD ["python", "main.py"]
 # Create app dir
 WORKDIR /app
 
