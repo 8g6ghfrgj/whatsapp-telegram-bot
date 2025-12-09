@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-إدارة قاعدة البيانات للبوت
-"""
 
 import sqlite3
 import logging
 from datetime import datetime
-from typing import List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
 class WhatsAppDatabase:
-    """فئة إدارة قاعدة البيانات"""
-    
     def __init__(self, db_file: str = "whatsapp_bot.db"):
         self.db_file = db_file
         self.conn = sqlite3.connect(db_file, check_same_thread=False)
@@ -21,10 +15,8 @@ class WhatsAppDatabase:
         self.init_database()
     
     def init_database(self):
-        """تهيئة جداول قاعدة البيانات"""
         cursor = self.conn.cursor()
         
-        # جدول الحسابات
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,7 +29,6 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول المجموعات
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS groups (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,13 +44,12 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول الروابط المجمعة
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS collected_links (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL,
                 link TEXT NOT NULL,
-                link_type TEXT NOT NULL,  -- 'whatsapp' أو 'telegram'
+                link_type TEXT NOT NULL,
                 source_group TEXT,
                 status TEXT DEFAULT 'pending',
                 added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -69,13 +59,12 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول قائمة انتظار الانضمام
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS join_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL,
                 link TEXT NOT NULL,
-                status TEXT DEFAULT 'pending',  -- pending, processing, completed, failed
+                status TEXT DEFAULT 'pending',
                 attempts INTEGER DEFAULT 0,
                 last_attempt DATETIME,
                 result_message TEXT,
@@ -85,7 +74,6 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول الرسائل
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,14 +87,13 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول الإرسال
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS message_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 account_id INTEGER NOT NULL,
                 message_id INTEGER NOT NULL,
                 group_name TEXT NOT NULL,
-                status TEXT NOT NULL,  -- sent, failed
+                status TEXT NOT NULL,
                 sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 error_message TEXT,
                 FOREIGN KEY (account_id) REFERENCES accounts (id),
@@ -114,7 +101,6 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول الإشعارات
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +112,6 @@ class WhatsAppDatabase:
             )
         """)
         
-        # جدول الإحصائيات
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS statistics (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,10 +128,7 @@ class WhatsAppDatabase:
         self.conn.commit()
         logger.info("✅ تم تهيئة قاعدة البيانات")
     
-    # ========== حسابات ==========
-    
     def add_account(self, name: str, phone_number: str = None) -> int:
-        """إضافة حساب جديد"""
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -163,7 +145,6 @@ class WhatsAppDatabase:
             return None
     
     def get_account(self, account_id: int = None, name: str = None):
-        """الحصول على معلومات حساب"""
         cursor = self.conn.cursor()
         if account_id:
             cursor.execute("SELECT * FROM accounts WHERE id = ?", (account_id,))
@@ -176,13 +157,11 @@ class WhatsAppDatabase:
         return dict(row) if row else None
     
     def get_all_accounts(self):
-        """الحصول على جميع الحسابات"""
         cursor = self.conn.cursor()
         cursor.execute("SELECT * FROM accounts ORDER BY created_at DESC")
         return [dict(row) for row in cursor.fetchall()]
     
     def update_account_status(self, account_id: int, status: str):
-        """تحديث حالة الحساب"""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE accounts 
@@ -192,11 +171,8 @@ class WhatsAppDatabase:
         self.conn.commit()
         return cursor.rowcount > 0
     
-    # ========== المجموعات ==========
-    
     def add_group(self, account_id: int, name: str, whatsapp_link: str = None, 
                   telegram_link: str = None) -> int:
-        """إضافة مجموعة جديدة"""
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -214,7 +190,6 @@ class WhatsAppDatabase:
             return None
     
     def get_groups(self, account_id: int = None, limit: int = 100):
-        """الحصول على المجموعات"""
         cursor = self.conn.cursor()
         if account_id:
             cursor.execute("""
@@ -228,21 +203,8 @@ class WhatsAppDatabase:
         
         return [dict(row) for row in cursor.fetchall()]
     
-    def mark_group_collected(self, group_id: int):
-        """تحديد المجموعة كمجمعة"""
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            UPDATE groups 
-            SET is_collected = TRUE, last_checked = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (group_id,))
-        self.conn.commit()
-    
-    # ========== الروابط المجمعة ==========
-    
     def add_collected_link(self, account_id: int, link: str, link_type: str, 
                           source_group: str = None) -> bool:
-        """إضافة رابط مجمع"""
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -258,7 +220,6 @@ class WhatsAppDatabase:
     
     def get_collected_links(self, account_id: int = None, link_type: str = None, 
                            status: str = None, limit: int = 100):
-        """الحصول على الروابط المجمعة"""
         cursor = self.conn.cursor()
         
         query = "SELECT * FROM collected_links WHERE 1=1"
@@ -283,7 +244,6 @@ class WhatsAppDatabase:
         return [dict(row) for row in cursor.fetchall()]
     
     def get_links_count(self, account_id: int = None, link_type: str = None) -> int:
-        """الحصول على عدد الروابط"""
         cursor = self.conn.cursor()
         
         query = "SELECT COUNT(*) as count FROM collected_links WHERE 1=1"
@@ -301,20 +261,7 @@ class WhatsAppDatabase:
         result = cursor.fetchone()
         return result['count'] if result else 0
     
-    def update_link_status(self, link_id: int, status: str):
-        """تحديث حالة الرابط"""
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            UPDATE collected_links 
-            SET status = ?, processed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (status, link_id))
-        self.conn.commit()
-    
-    # ========== قائمة انتظار الانضمام ==========
-    
     def add_to_join_queue(self, account_id: int, link: str) -> int:
-        """إضافة رابط لقائمة انتظار الانضمام"""
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -328,7 +275,6 @@ class WhatsAppDatabase:
             return None
     
     def get_pending_joins(self, account_id: int, limit: int = 5):
-        """الحصول على الروابط المعلقة للانضمام"""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT * FROM join_queue 
@@ -339,7 +285,6 @@ class WhatsAppDatabase:
         return [dict(row) for row in cursor.fetchall()]
     
     def update_join_status(self, join_id: int, status: str, result_message: str = None):
-        """تحديث حالة الانضمام"""
         cursor = self.conn.cursor()
         if status == 'completed':
             cursor.execute("""
@@ -369,7 +314,6 @@ class WhatsAppDatabase:
         self.conn.commit()
     
     def get_join_queue_stats(self, account_id: int):
-        """الحصول على إحصائيات قائمة الانتظار"""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT 
@@ -384,10 +328,7 @@ class WhatsAppDatabase:
         
         return dict(cursor.fetchone())
     
-    # ========== الرسائل ==========
-    
     def add_message(self, account_id: int, content: str, message_type: str = 'text') -> int:
-        """إضافة رسالة جديدة"""
         cursor = self.conn.cursor()
         try:
             cursor.execute("""
@@ -401,7 +342,6 @@ class WhatsAppDatabase:
             return None
     
     def get_messages(self, account_id: int = None, limit: int = 50):
-        """الحصول على الرسائل"""
         cursor = self.conn.cursor()
         if account_id:
             cursor.execute("""
@@ -421,7 +361,6 @@ class WhatsAppDatabase:
         return [dict(row) for row in cursor.fetchall()]
     
     def delete_message(self, message_id: int) -> bool:
-        """حذف رسالة"""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE messages 
@@ -432,7 +371,6 @@ class WhatsAppDatabase:
         return cursor.rowcount > 0
     
     def get_messages_count(self, account_id: int = None) -> int:
-        """الحصول على عدد الرسائل"""
         cursor = self.conn.cursor()
         if account_id:
             cursor.execute("""
@@ -445,10 +383,7 @@ class WhatsAppDatabase:
         result = cursor.fetchone()
         return result['count'] if result else 0
     
-    # ========== الإشعارات ==========
-    
     def add_notification(self, user_id: int, message: str, notification_type: str):
-        """إضافة إشعار"""
         cursor = self.conn.cursor()
         cursor.execute("""
             INSERT INTO notifications (user_id, message, notification_type)
@@ -458,7 +393,6 @@ class WhatsAppDatabase:
         return cursor.lastrowid
     
     def get_unread_notifications(self, user_id: int, limit: int = 10):
-        """الحصول على الإشعارات غير المقروءة"""
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT * FROM notifications 
@@ -469,7 +403,6 @@ class WhatsAppDatabase:
         return [dict(row) for row in cursor.fetchall()]
     
     def mark_notification_read(self, notification_id: int):
-        """تحديد الإشعار كمقروء"""
         cursor = self.conn.cursor()
         cursor.execute("""
             UPDATE notifications 
@@ -478,28 +411,22 @@ class WhatsAppDatabase:
         """, (notification_id,))
         self.conn.commit()
     
-    # ========== الإحصائيات ==========
-    
     def update_statistics(self, account_id: int, stat_type: str, value: int = 1):
-        """تحديث الإحصائيات"""
         today = datetime.now().date()
         cursor = self.conn.cursor()
         
-        # التحقق إذا كان هناك سجل لهذا اليوم
         cursor.execute("""
             SELECT id FROM statistics 
             WHERE account_id = ? AND date = ?
         """, (account_id, today))
         
         if cursor.fetchone():
-            # تحديث السجل الموجود
             cursor.execute(f"""
                 UPDATE statistics 
                 SET {stat_type} = {stat_type} + ?
                 WHERE account_id = ? AND date = ?
             """, (value, account_id, today))
         else:
-            # إنشاء سجل جديد
             stats_data = {
                 'account_id': account_id,
                 'date': today,
@@ -523,7 +450,6 @@ class WhatsAppDatabase:
         self.conn.commit()
     
     def close(self):
-        """إغلاق اتصال قاعدة البيانات"""
         if self.conn:
             self.conn.close()
             logger.info("✅ تم إغلاق اتصال قاعدة البيانات")
