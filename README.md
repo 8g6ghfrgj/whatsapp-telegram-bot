@@ -1,16 +1,45 @@
-# WhatsApp Telegram Bot (Selenium + WhatsApp Web)
+# 🤖 بوت WhatsApp المتقدم
 
-This project runs a Telegram bot that controls WhatsApp Web via Selenium (Chromium).
-Deploy-ready for Render using Docker.
+بوت تلجرام لإدارة حسابات WhatsApp مع تجميع الروابط والانضمام الذكي للمجموعات.
 
-## Setup
-1. Add repository to GitHub.
-2. On Render create a new **Web Service** with Docker (connect to GitHub repo).
-3. Set Environment Variables:
-   - BOT_TOKEN = your telegram bot token
-   - (optional) WHATSAPP_SESSION_DIR = /tmp/whatsapp_session
-4. Deploy.
+## ✨ المميزات
 
-## Notes
-- Uses WhatsApp Web via Selenium. Use with caution (may lead to account restrictions).
-- Ensure your Render plan allows Chromium (enough memory).
+### 1. **إدارة حسابات متعددة**
+- ربط أكثر من حساب WhatsApp
+- التبديل بين الحسابات بسهولة
+- تخزين جلسات منفصلة
+
+### 2. **تجميع الروابط الذكي**
+- تجميع روابط WhatsApp من جميع المجموعات
+- تجميع روابط Telegram من جميع المجموعات
+- منع تكرار الروابط تلقائياً
+
+### 3. **الانضمام الذكي للمجموعات**
+- انضمام لـ 5 مجموعات كل 5 دقائق
+- إشعارات فورية عند النجاح أو الفشل
+- قائمة انتظار ذكية
+
+### 4. **إرسال رسائل متقدم**
+- إرسال رسائل لجميع المجموعات
+- إرسال رسائل لمجموعات محددة
+- إدارة الرسائل المحفوظة
+
+## 🚀 النشر على Render.com
+
+### الخطوة 1: إنشاء مستودع GitHub
+1. أنشئ مستودع جديد على GitHub
+2. ارفع جميع الملفات إلى المستودع
+
+### الخطوة 2: إنشاء خدمة على Render
+1. سجل الدخول إلى [Render.com](https://render.com)
+2. اضغط على "New +" → "Web Service"
+3. اختر المستودع الخاص بك
+
+### الخطوة 3: إعدادات الخدمة
+- **Name**: `whatsapp-bot`
+- **Environment**: `Python`
+- **Region**: `Frankfurt` (أو أي منطقة)
+- **Branch**: `main`
+- **Build Command**:
+  ```bash
+  pip install --upgrade pip && pip install -r requirements.txt
