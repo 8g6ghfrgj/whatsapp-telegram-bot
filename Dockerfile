@@ -1,24 +1,59 @@
-FROM python:3.11
+# Use Python slim as base
+FROM python:3.10-slim
 
-# تثبيت Chrome
-RUN apt-get update && apt-get install -y \
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install dependencies for Chromium + Chromedriver + fonts
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
+    ca-certificates \
+    gnupg \
     unzip \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable \
-    && wget -O /tmp/chromedriver.zip https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.109/linux64/chromedriver-linux64.zip \
-    && unzip /tmp/chromedriver.zip -d /tmp/ \
-    && mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver \
-    && chmod +x /usr/local/bin/chromedriver \
-    && rm -rf /tmp/*
+    xvfb \
+    fonts-liberation \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libpangocairo-1.0-0 \
+    libxss1 \
+    libgtk-3-0 \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
 
+# Install Chromium
+RUN apt-get update && apt-get install -y chromium && rm -rf /var/lib/apt/lists/*
+
+# Install chromedriver that matches chromium package
+# On some distros chromedriver package exists; try apt-get chromedriver, otherwise install manually
+RUN apt-get update && apt-get install -y chromium-driver || true && rm -rf /var/lib/apt/lists/*
+
+# Create app dir
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy requirements and code
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
-COPY . .
+COPY . /app
 
-CMD ["python", "bot.py"]
+# Make start script executable
+RUN chmod +x /app/start.sh
+
+# Environment variables recommended
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/lib/chromium/chromedriver
+
+# Create session dir (persist via Render disk)
+RUN mkdir -p /tmp/whatsapp_session
+VOLUME ["/tmp/whatsapp_session"]
+
+# Expose nothing (bot uses polling)
+CMD ["/app/start.sh"]
