@@ -1,2 +1,7 @@
-python-telegram-bot==20.5
-selenium==4.12.0
+python-telegram-bot==20.7
+selenium==4.15.2
+webdriver-manager==4.0.1
+APScheduler==3.10.4
+pytz==2023.3
+schedule==1.2.0
+pillow==10.1.0
