@@ -15,7 +15,7 @@ services:
       fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
       --no-install-recommends \
       && rm -rf /var/lib/apt/lists/* \
-      && npm install
+      && npm ci
     startCommand: npm start
     envVars:
       - key: BOT_TOKEN
@@ -27,8 +27,4 @@ services:
       - key: NODE_ENV
         value: production
     plan: free
-    disk:
-      name: data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
     autoDeploy: true
