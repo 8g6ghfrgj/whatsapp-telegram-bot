@@ -1,29 +1,7 @@
-# التبعيات
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# البيانات والجلسات
-data/
-sessions/
-*.session*
-
-# المفاتيح
 .env
-.env.local
-.env.*.local
-
-# نظام التشغيل
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# ملفات النظام
 *.log
-logs/
+.DS_Store
+data/sessions/*
+data/qrcodes/*
+!.gitkeep
