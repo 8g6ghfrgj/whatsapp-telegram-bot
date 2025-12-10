@@ -1,23 +1,29 @@
 services:
-  - type: web
+  - type: worker
     name: whatsapp-companion-bot
     env: python
-    region: frankfurt  # أو أي منطقة قريبة منك
+    region: frankfurt
     plan: free
-    buildCommand: "./setup.sh"
-    startCommand: "python main.py"
+    buildCommand: |
+      chmod +x setup.sh
+      ./setup.sh
+    startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
         sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: bot-database
-          property: connectionString
+      - key: ADMIN_IDS
+        sync: false
       - key: PYTHON_VERSION
         value: 3.9.0
+      - key: PLAYWRIGHT_HEADLESS
+        value: true
+      - key: RENDER
+        value: true
+      - key: PORT
+        value: 8080
 
 databases:
-  - name: bot-database
+  - name: whatsapp-bot-db
     plan: free
-    databaseName: botdb
-    user: botuser
+    databaseName: whatsappbot
+    user: whatsappuser
