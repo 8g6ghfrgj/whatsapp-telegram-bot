@@ -1,0 +1,10 @@
+aiogram==2.25.1
+aiohttp==3.9.0
+pyrogram==2.0.106
+pydantic==2.5.0
+sqlalchemy==2.0.23
+playwright==1.40.0
+qrcode==7.4.2
+pillow==10.1.0
+python-dotenv==1.0.0
+apscheduler==3.10.4
