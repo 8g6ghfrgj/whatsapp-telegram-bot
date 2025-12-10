@@ -1,0 +1,23 @@
+# التبعيات
+node_modules/
+npm-debug.log*
+
+# البيانات والجلسات
+data/
+sessions/
+*.session*
+
+# المفاتيح والبيانات الحساسة
+.env
+.env.local
+.env.*.local
+
+# نظام التشغيل
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
