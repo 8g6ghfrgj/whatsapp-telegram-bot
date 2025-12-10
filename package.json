@@ -1,7 +1,7 @@
 {
   "name": "whatsapp-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp Bot for Telegram",
+  "version": "2.0.0",
+  "description": "WhatsApp Management Bot via Telegram Commands",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
@@ -19,7 +19,7 @@
   "engines": {
     "node": ">=16.0.0"
   },
-  "keywords": ["whatsapp", "telegram", "bot"],
+  "keywords": ["whatsapp", "telegram", "bot", "automation"],
   "author": "",
   "license": "MIT"
 }
