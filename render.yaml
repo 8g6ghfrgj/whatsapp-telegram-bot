@@ -4,31 +4,14 @@ services:
     env: node
     region: frankfurt
     buildCommand: |
-      # تحديث حزم النظام الأساسية
+      # تثبيت Chromium والأدوات الأساسية
       apt-get update
-      
-      # تثبيت الأدوات الأساسية
       apt-get install -y \
         wget \
         gnupg \
         ca-certificates \
-        software-properties-common \
-        procps \
-        curl \
-        git
-      
-      # إضافة مفتاح Google Chrome
-      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
-      
-      # إضافة مستودع Chrome
-      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list
-      
-      # تحديث الحزم بعد إضافة المستودع
-      apt-get update
-      
-      # تثبيت Google Chrome مع جميع المكتبات المطلوبة
-      apt-get install -y \
-        google-chrome-stable \
+        chromium \
+        chromium-sandbox \
         fonts-ipafont-gothic \
         fonts-wqy-zenhei \
         fonts-thai-tlwg \
@@ -44,48 +27,29 @@ services:
         libnss3 \
         libcups2 \
         libxrandr2 \
-        libasound2 \
-        libpangocairo-1.0-0 \
-        libatk1.0-0 \
-        libatk-bridge2.0-0 \
-        libgtk-3-0 \
-        libgbm-dev \
-        libxshmfence-dev \
-        libdrm-dev
+        libasound2
       
-      # تنظيف ملفات التثبيت المؤقتة لتوفير المساحة
+      # تنظيف الملفات المؤقتة
       apt-get clean
       rm -rf /var/lib/apt/lists/*
       
-      # تنظيف cache npm وإعادة التثبيت
-      npm cache clean --force
-      rm -rf node_modules package-lock.json
+      # التحقق من تثبيت Chromium
+      echo "✅ Chromium installed: $(chromium --version)"
       
-      # تثبيت تبعيات المشروع
+      # تثبيت تبعيات Node.js
       npm install --production
-      
-      # التحقق من تثبيت Chrome
-      echo "✅ Chrome version: $(google-chrome-stable --version)"
     startCommand: npm start
     envVars:
       - key: BOT_TOKEN
         sync: false
-        value: YOUR_BOT_TOKEN_HERE
       - key: ADMIN_ID
         sync: false
-        value: YOUR_ADMIN_ID_HERE
       - key: PORT
         value: 3000
       - key: NODE_ENV
         value: production
-      - key: RENDER
-        value: "true"
-    plan: starter  # أو professional حسب خطة Render الخاص بك
+    plan: starter
     disk:
       name: data
       mountPath: /opt/render/project/src/data
       sizeGB: 1
-    healthCheckPath: /health
-    autoDeploy: true
-    branch: main
-    rootDirectory: /
