@@ -1,8 +1,8 @@
 import os
 import logging
 import sys
-from aiogram import Bot, Dispatcher, types
-from aiogram.utils import executor
+# بدلاً من: from whatsapp_client import WhatsAppClient
+from whatsapp_client_selenium import WhatsAppSeleniumClient as WhatsAppClient
 
 # إعداد التسجيل
 logging.basicConfig(
