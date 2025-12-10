@@ -5,8 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "echo \"No test specified\" && exit 1"
+    "dev": "nodemon index.js"
   },
   "keywords": ["whatsapp", "telegram", "bot", "automation"],
   "author": "Your Name",
@@ -24,9 +23,6 @@
     "fs-extra": "^11.1.1",
     "dotenv": "^16.0.3",
     "puppeteer": "^21.5.0"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.22"
   },
   "engines": {
     "node": ">=16.0.0"
