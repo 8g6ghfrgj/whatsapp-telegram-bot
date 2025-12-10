@@ -1,55 +1,23 @@
 services:
   - type: web
-    name: whatsapp-bot
-    env: node
-    region: frankfurt
-    buildCommand: |
-      # تثبيت Chromium والأدوات الأساسية
-      apt-get update
-      apt-get install -y \
-        wget \
-        gnupg \
-        ca-certificates \
-        chromium \
-        chromium-sandbox \
-        fonts-ipafont-gothic \
-        fonts-wqy-zenhei \
-        fonts-thai-tlwg \
-        fonts-kacst \
-        fonts-freefont-ttf \
-        libxss1 \
-        libx11-xcb1 \
-        libxcomposite1 \
-        libxcursor1 \
-        libxdamage1 \
-        libxi6 \
-        libxtst6 \
-        libnss3 \
-        libcups2 \
-        libxrandr2 \
-        libasound2
-      
-      # تنظيف الملفات المؤقتة
-      apt-get clean
-      rm -rf /var/lib/apt/lists/*
-      
-      # التحقق من تثبيت Chromium
-      echo "✅ Chromium installed: $(chromium --version)"
-      
-      # تثبيت تبعيات Node.js
-      npm install --production
-    startCommand: npm start
+    name: whatsapp-companion-bot
+    env: python
+    region: frankfurt  # أو أي منطقة قريبة منك
+    plan: free
+    buildCommand: "./setup.sh"
+    startCommand: "python main.py"
     envVars:
       - key: BOT_TOKEN
         sync: false
-      - key: ADMIN_ID
-        sync: false
-      - key: PORT
-        value: 3000
-      - key: NODE_ENV
-        value: production
-    plan: starter
-    disk:
-      name: data
-      mountPath: /opt/render/project/src/data
-      sizeGB: 1
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bot-database
+          property: connectionString
+      - key: PYTHON_VERSION
+        value: 3.9.0
+
+databases:
+  - name: bot-database
+    plan: free
+    databaseName: botdb
+    user: botuser
