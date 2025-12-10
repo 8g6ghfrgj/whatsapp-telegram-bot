@@ -3,6 +3,7 @@ services:
     name: whatsapp-telegram-bot
     env: node
     region: frankfurt
+    rootDir: .  # ⭐ هام: البحث من الجذر
     buildCommand: |
       apt-get update && apt-get install -y \
       wget \
@@ -15,7 +16,7 @@ services:
       fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
       --no-install-recommends \
       && rm -rf /var/lib/apt/lists/* \
-      && npm ci
+      && npm install
     startCommand: npm start
     envVars:
       - key: BOT_TOKEN
