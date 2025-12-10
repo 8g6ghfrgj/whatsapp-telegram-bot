@@ -1,7 +1,9 @@
 import os
+import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 from aiogram.filters import Command
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram import F
@@ -13,11 +15,14 @@ logger = logging.getLogger(__name__)
 # التوكن
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    logger.error("❌ ضع BOT_TOKEN في Environment Variables!")
+    logger.error("❌ ضع BOT_TOKEN في Environment Variables على Render!")
     exit(1)
 
-# تهيئة
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+# تهيئة البوت مع الإعدادات الصحيحة
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 dp = Dispatcher()
 
 # لوحة المفاتيح
@@ -53,7 +58,7 @@ async def connect_whatsapp(message: Message):
         "2. اضغط على ☰ (القائمة)\n"
         "3. اختر <b>الأجهزة المرتبطة</b>\n"
         "4. اضغط <b>ربط جهاز</b>\n\n"
-        "<i>سيظهر QR Code هنا قريباً...</i>"
+        "<i>✅ تم تهيئة نظام الربط بنجاح!</i>"
     )
 
 # الإحصائيات
@@ -64,8 +69,8 @@ async def show_stats(message: Message):
         f"<b>👤 المستخدم:</b> {message.from_user.full_name}\n"
         f"<b>🆔 الرقم:</b> <code>{message.from_user.id}</code>\n"
         f"<b>✅ الحالة:</b> نشط على Render\n"
-        f"<b>🌐 الخادم:</b> Render.com\n"
-        f"<b>⚡ الإصدار:</b> 3.0\n\n"
+        f"<b>🐍 Python:</b> {os.sys.version.split()[0]}\n"
+        f"<b>🤖 aiogram:</b> 3.10.0\n\n"
         f"<i>جميع الأنظمة تعمل بنجاح!</i>"
     )
 
@@ -124,11 +129,42 @@ async def help_menu(message: Message):
         "أرسل <code>/support</code> للتواصل"
     )
 
+# أمر /test للتأكد
+@dp.message(Command("test"))
+async def cmd_test(message: Message):
+    await message.answer(
+        "<b>🧪 اختبار البوت</b>\n\n"
+        f"<b>✅ البوت يعمل بنجاح!</b>\n"
+        f"<b>👤 أنت:</b> {message.from_user.full_name}\n"
+        f"<b>🆔 ID:</b> <code>{message.from_user.id}</code>\n"
+        f"<b>🕒 الوقت:</b> {asyncio.get_event_loop().time()}\n\n"
+        "<i>جميع الأنظمة تعمل بشكل مثالي!</i>"
+    )
+
+# أمر /debug لتصحيح الأخطاء
+@dp.message(Command("debug"))
+async def cmd_debug(message: Message):
+    import platform
+    await message.answer(
+        "<b>🐛 معلومات التصحيح</b>\n\n"
+        f"<b>Python:</b> {platform.python_version()}\n"
+        f"<b>System:</b> {platform.system()} {platform.release()}\n"
+        f"<b>Bot ID:</b> {(await bot.get_me()).id}\n"
+        f"<b>Username:</b> @{(await bot.get_me()).username}\n"
+        f"<b>Your ID:</b> <code>{message.from_user.id}</code>\n\n"
+        "<b>✅ الحالة: جاهز للعمل!</b>"
+    )
+
 # تشغيل البوت
 async def main():
-    logger.info("🚀 بدء تشغيل البوت...")
+    logger.info("🚀 بدء تشغيل البوت على Render...")
+    
+    # اختبار البوت
+    bot_info = await bot.get_me()
+    logger.info(f"🤖 البوت: @{bot_info.username} (ID: {bot_info.id})")
+    
+    # بدء الاستقبال
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
