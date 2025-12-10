@@ -1,54 +1,84 @@
-import asyncio
+import os
 import logging
 import sys
 from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.fsm_storage.memory import MemoryStorage
 from aiogram.utils import executor
-import config
 
 # إعداد التسجيل
 logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f'{config.LOGS_DIR}/bot.log')
-    ]
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
+# قراءة التوكن من البيئة
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+if not BOT_TOKEN:
+    logger.error("❌ ERROR: BOT_TOKEN is not set!")
+    logger.error("💡 Please add BOT_TOKEN in Render Environment Variables")
+    sys.exit(1)
+
+# تهيئة
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
+
+# أمر البدء
+@dp.message_handler(commands=['start', 'help'])
+async def send_welcome(message: types.Message):
+    await message.answer(
+        "🎉 **بوت واتساب المصاحب يعمل بنجاح!**\n\n"
+        f"✅ تم النشر على Render\n"
+        f"👤 أنت: {message.from_user.first_name}\n"
+        f"🆔 ID: {message.from_user.id}\n\n"
+        "🔧 الميزات القادمة:\n"
+        "• ربط حساب واتساب\n"
+        "• نشر تلقائي\n"
+        "• ردود ذكية\n"
+        "• جمع الروابط",
+        parse_mode="Markdown"
+    )
+
+@dp.message_handler(commands=['test'])
+async def test_command(message: types.Message):
+    await message.answer("✅ البوت يستجيب بشكل صحيح!")
+
+@dp.message_handler(commands=['debug'])
+async def debug_info(message: types.Message):
+    info = f"""
+    📊 **معلومات التصحيح:**
+    
+    🐍 Python: {sys.version}
+    📁 Current dir: {os.getcwd()}
+    📝 Files in dir: {', '.join(os.listdir('.'))}
+    🔧 BOT_TOKEN exists: {'✅' if BOT_TOKEN else '❌'}
+    👤 Your ID: {message.from_user.id}
+    
+    ⚙️ **Environment:**
+    RENDER: {os.getenv('RENDER', 'Not set')}
+    PORT: {os.getenv('PORT', 'Not set')}
+    """
+    await message.answer(info)
+
+# عند البدء
 async def on_startup(dp):
-    """تنفيذ عند بدء التشغيل"""
-    logger.info("Starting bot...")
+    logger.info("="*50)
+    logger.info("🚀 WHATSAPP COMPANION BOT STARTED")
+    logger.info("="*50)
+    logger.info(f"🤖 Bot ID: {dp.bot.id}")
+    logger.info(f"🔧 Token present: {'✅' if BOT_TOKEN else '❌'}")
+    logger.info(f"🌐 Running on Render: {'✅' if os.getenv('RENDER') else '❌'}")
     
-    # تنظيف الجلسات القديمة
-    if config.is_render:
-        logger.info("Running on Render cloud")
-    
+    # تعيين أوامر القائمة
     await dp.bot.set_my_commands([
         types.BotCommand("start", "بدء البوت"),
-        types.BotCommand("help", "المساعدة"),
-        types.BotCommand("stats", "الإحصائيات"),
-        types.BotCommand("menu", "القائمة الرئيسية")
+        types.BotCommand("test", "اختبار البوت"),
+        types.BotCommand("debug", "معلومات التصحيح")
     ])
 
-async def on_shutdown(dp):
-    """تنفيذ عند إيقاف التشغيل"""
-    logger.info("Shutting down bot...")
-    # إغلاق اتصالات قاعدة البيانات
-    # إغلاق عملاء واتساب
-    await dp.storage.close()
-    await dp.storage.wait_closed()
-
 if __name__ == '__main__':
-    from handlers import dp  # تأكد من استيراد dp من handlers
-    
-    # تشغيل البوت
-    executor.start_polling(
-        dp,
-        skip_updates=True,
-        on_startup=on_startup,
-        on_shutdown=on_shutdown,
-        timeout=60,
-        relax=0.1
-    )
+    try:
+        logger.info("🎬 Starting bot polling...")
+        executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    except Exception as e:
+        logger.error(f"💥 Failed to start: {e}")
+        sys.exit(1)
