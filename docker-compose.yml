@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    container_name: whatsapp-bot
+    environment:
+      - NODE_ENV=development
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ADMIN_IDS=${TELEGRAM_ADMIN_IDS}
+    volumes:
+      - ./sessions:/app/sessions
+      - ./database:/app/database
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
