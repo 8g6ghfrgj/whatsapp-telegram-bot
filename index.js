@@ -1,5 +1,6 @@
 // ============================================
 // الملف الرئيسي: WhatsApp-Telegram Bot - النسخة الكاملة
+// مع دعم Web Service ومنفذ Render
 // ============================================
 
 require('dotenv').config();
@@ -9,20 +10,232 @@ const { execSync } = require('child_process');
 const { Sequelize, Op } = require('sequelize');
 
 // ============================================
-// 1. استيراد نماذج قاعدة البيانات
+// 1. إعداد Express لـ Web Service
+// ============================================
+const express = require('express');
+const app = express();
+const PORT = process.env.PORT || 3000; // مهم: Render يحدد المنفذ عبر PORT
+
+// Middleware الأساسي
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// route الصحة للتحقق من حالة الخادم
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        service: 'whatsapp-telegram-bot',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// route الرئيسي
+app.get('/', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="ar" dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>WhatsApp-Telegram Bot</title>
+            <style>
+                body {
+                    font-family: 'Arial', sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    text-align: center;
+                    padding: 50px;
+                    margin: 0;
+                }
+                .container {
+                    max-width: 800px;
+                    margin: 0 auto;
+                    background: rgba(255, 255, 255, 0.1);
+                    backdrop-filter: blur(10px);
+                    border-radius: 20px;
+                    padding: 40px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }
+                h1 {
+                    font-size: 2.5em;
+                    margin-bottom: 20px;
+                    color: #fff;
+                }
+                .status {
+                    background: rgba(0, 255, 0, 0.2);
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin: 20px 0;
+                    font-size: 1.2em;
+                }
+                .info {
+                    text-align: right;
+                    background: rgba(255, 255, 255, 0.1);
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px 0;
+                }
+                .bot-link {
+                    display: inline-block;
+                    background: #0088cc;
+                    color: white;
+                    padding: 15px 30px;
+                    border-radius: 50px;
+                    text-decoration: none;
+                    font-size: 1.2em;
+                    margin: 20px 0;
+                    transition: all 0.3s ease;
+                }
+                .bot-link:hover {
+                    background: #006699;
+                    transform: translateY(-2px);
+                    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+                }
+                .stats {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                    gap: 15px;
+                    margin: 30px 0;
+                }
+                .stat-box {
+                    background: rgba(255, 255, 255, 0.15);
+                    padding: 20px;
+                    border-radius: 10px;
+                }
+                .commands {
+                    text-align: right;
+                    margin-top: 30px;
+                }
+                .command {
+                    background: rgba(255, 255, 255, 0.1);
+                    padding: 10px;
+                    margin: 5px;
+                    border-radius: 5px;
+                    display: inline-block;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🤖 WhatsApp-Telegram Bot</h1>
+                <div class="status">✅ الخدمة تعمل بنجاح</div>
+                
+                <div class="info">
+                    <h3>📊 معلومات النظام:</h3>
+                    <p>⏱️ وقت التشغيل: ${Math.floor(process.uptime() / 3600)} ساعة</p>
+                    <p>🌐 البيئة: ${process.env.NODE_ENV || 'development'}</p>
+                    <p>🚪 المنفذ: ${PORT}</p>
+                </div>
+                
+                <a href="https://t.me/${process.env.BOT_USERNAME || 'your_bot'}" class="bot-link" target="_blank">
+                    💬 ابدأ المحادثة مع البوت
+                </a>
+                
+                <div class="stats">
+                    <div class="stat-box">
+                        <h4>📱 الجلسات</h4>
+                        <p id="sessions-count">جاري التحميل...</p>
+                    </div>
+                    <div class="stat-box">
+                        <h4>🔗 الروابط</h4>
+                        <p id="links-count">جاري التحميل...</p>
+                    </div>
+                    <div class="stat-box">
+                        <h4>📢 الإعلانات</h4>
+                        <p id="ads-count">جاري التحميل...</p>
+                    </div>
+                </div>
+                
+                <div class="commands">
+                    <h3>🎮 أوامر البوت الرئيسية:</h3>
+                    <div class="command">/start</div>
+                    <div class="command">/sessions</div>
+                    <div class="command">/ads</div>
+                    <div class="command">/links</div>
+                    <div class="command">/autopost</div>
+                    <div class="command">/stats</div>
+                    <div class="command">/help</div>
+                </div>
+            </div>
+            
+            <script>
+                // تحديث الإحصائيات تلقائياً
+                async function updateStats() {
+                    try {
+                        const response = await fetch('/api/stats');
+                        const data = await response.json();
+                        
+                        document.getElementById('sessions-count').textContent = 
+                            data.sessions || 'غير متاح';
+                        document.getElementById('links-count').textContent = 
+                            data.links || 'غير متاح';
+                        document.getElementById('ads-count').textContent = 
+                            data.ads || 'غير متاح';
+                    } catch (error) {
+                        console.error('خطأ في جلب الإحصائيات:', error);
+                    }
+                }
+                
+                // تحديث أولي
+                updateStats();
+                // تحديث كل 30 ثانية
+                setInterval(updateStats, 30000);
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// API للإحصائيات
+app.get('/api/stats', async (req, res) => {
+    try {
+        const stats = {
+            sessions: 0,
+            links: 0,
+            ads: 0,
+            timestamp: new Date().toISOString()
+        };
+        
+        // محاولة جلب الإحصائيات من قاعدة البيانات إذا كانت متاحة
+        if (sequelize && Admin) {
+            try {
+                stats.sessions = await WhatsAppSession.count();
+                stats.links = await CollectedLink.count();
+                stats.ads = await Advertisement.count();
+            } catch (dbError) {
+                console.log('قاعدة البيانات غير جاهزة بعد:', dbError.message);
+            }
+        }
+        
+        res.json(stats);
+    } catch (error) {
+        res.status(500).json({ error: 'خطأ في جلب الإحصائيات' });
+    }
+});
+
+// ============================================
+// 2. تعريف نماذج قاعدة البيانات
 // ============================================
 console.log('🚀 بدء تشغيل WhatsApp-Telegram Bot...');
 console.log('=========================================');
 
-// تعريف النماذج مباشرة هنا (بدون ملف models.js منفصل)
-const sequelize = new Sequelize(process.env.DATABASE_URL || 'sqlite:./database/bot.db', {
+// إنشاء اتصال قاعدة البيانات
+const sequelize = new Sequelize(process.env.DATABASE_URL || 'sqlite://./database/bot.db', {
     logging: process.env.DB_LOGGING === 'true' ? console.log : false,
     pool: {
         max: 10,
         min: 0,
         acquire: 30000,
         idle: 10000
-    }
+    },
+    dialectOptions: process.env.DATABASE_URL?.includes('postgres') ? {
+        ssl: {
+            require: true,
+            rejectUnauthorized: false
+        }
+    } : {}
 });
 
 // نموذج المشرفين
@@ -35,7 +248,8 @@ const Admin = sequelize.define('Admin', {
     passwordHash: Sequelize.STRING,
     permissions: { type: Sequelize.JSON, defaultValue: ['basic'] },
     isActive: { type: Sequelize.BOOLEAN, defaultValue: true },
-    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
+    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
+    updatedAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
 // نموذج جلسات واتساب
@@ -51,7 +265,8 @@ const WhatsAppSession = sequelize.define('WhatsAppSession', {
     },
     qrCode: Sequelize.TEXT,
     lastActivity: Sequelize.DATE,
-    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
+    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
+    updatedAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
 // نموذج الروابط المجمعة
@@ -83,7 +298,8 @@ const Advertisement = sequelize.define('Advertisement', {
     isActive: { type: Sequelize.BOOLEAN, defaultValue: true },
     schedule: Sequelize.JSON,
     stats: { type: Sequelize.JSON, defaultValue: { sent: 0, failed: 0 } },
-    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
+    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
+    updatedAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
 // نموذج الردود التلقائية
@@ -102,11 +318,12 @@ const AutoReply = sequelize.define('AutoReply', {
         defaultValue: 'contains'
     },
     stats: { type: Sequelize.JSON, defaultValue: { triggered: 0 } },
-    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
+    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW },
+    updatedAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
 // ============================================
-// 2. التحقق من الإعدادات المبدئية
+// 3. التحقق من الإعدادات المبدئية
 // ============================================
 const requiredEnvVars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ADMIN_IDS'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -121,7 +338,7 @@ if (missingEnvVars.length > 0) {
 }
 
 // ============================================
-// 3. استيراد المكتبات
+// 4. استيراد المكتبات
 // ============================================
 const TelegramBot = require('node-telegram-bot-api');
 const cron = require('node-cron');
@@ -129,7 +346,7 @@ const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 
 // ============================================
-// 4. إعداد قاعدة البيانات
+// 5. إعداد قاعدة البيانات
 // ============================================
 console.log('🗄️  جاري إعداد قاعدة البيانات...');
 
@@ -138,7 +355,7 @@ async function initializeDatabase() {
         await sequelize.authenticate();
         console.log('✅ اتصال قاعدة البيانات ناجح');
         
-        // مزامنة النماذج
+        // مزامنة النماذج وإنشاء الجداول
         await sequelize.sync({ alter: true });
         console.log('✅ تم مزامنة نماذج قاعدة البيانات');
         
@@ -167,7 +384,7 @@ async function initializeDatabase() {
 }
 
 // ============================================
-// 5. إعداد بوت تليجرام
+// 6. إعداد بوت تليجرام
 // ============================================
 console.log('🤖 جاري إعداد بوت تليجرام...');
 
@@ -186,178 +403,37 @@ const userStates = new Map();
 const activeAutoPosts = new Map();
 
 // ============================================
-// 6. استيراد وتهيئة المكونات
+// 7. استيراد وتهيئة المكونات
 // ============================================
 console.log('🔧 جاري تحميل المكونات...');
 
-// استيراد مدير واتساب
-let WhatsAppManager;
+// استيراد هاندلر تليجرام المعدل
+let TelegramBotHandler;
 try {
-    const { Client, LocalAuth } = require('whatsapp-web.js');
-    const qrcode = require('qrcode-terminal');
-    const EventEmitter = require('events');
+    const TelegramBotClass = require('./src/telegramBot');
+    // استيراد مدير واتساب (قد يحتاج لتعديل)
+    let whatsappManager = { 
+        getStats: () => ({ totalSessions: 0, readySessions: 0 }),
+        getReadySessions: () => []
+    };
     
-    // فئة جلسة واتساب
-    class WhatsAppSession extends EventEmitter {
-        constructor(sessionId, adminId, phoneNumber = null) {
-            super();
-            this.sessionId = sessionId;
-            this.adminId = adminId;
-            this.phoneNumber = phoneNumber;
-            this.status = 'initializing';
-            this.client = null;
-            this.qrCode = null;
-            
-            this.config = {
-                authStrategy: new LocalAuth({ 
-                    clientId: `whatsapp-session-${sessionId}`,
-                    dataPath: path.join('./sessions', sessionId)
-                }),
-                puppeteer: {
-                    headless: process.env.BROWSER_HEADLESS !== 'false',
-                    args: (process.env.BROWSER_ARGS || '--no-sandbox,--disable-setuid-sandbox').split(','),
-                    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
-                }
-            };
-            
-            this.initialize();
-        }
-        
-        async initialize() {
-            try {
-                this.client = new Client(this.config);
-                
-                this.client.on('qr', (qr) => {
-                    this.qrCode = qr;
-                    this.status = 'awaiting_qr';
-                    qrcode.generate(qr, { small: true });
-                    this.emit('qr', { sessionId: this.sessionId, qrCode: qr });
-                });
-                
-                this.client.on('ready', () => {
-                    this.status = 'ready';
-                    this.phoneNumber = this.client.info.wid.user;
-                    this.emit('ready', { 
-                        sessionId: this.sessionId, 
-                        phoneNumber: this.phoneNumber 
-                    });
-                });
-                
-                this.client.on('disconnected', (reason) => {
-                    this.status = 'disconnected';
-                    this.emit('disconnected', { sessionId: this.sessionId, reason });
-                });
-                
-                await this.client.initialize();
-            } catch (error) {
-                this.status = 'error';
-                this.emit('error', { sessionId: this.sessionId, error: error.message });
-            }
-        }
-        
-        async sendMessage(to, content) {
-            if (this.status !== 'ready') throw new Error('الجلسة غير جاهزة');
-            return await this.client.sendMessage(to, content);
-        }
-        
-        async getChats() {
-            if (this.status !== 'ready') throw new Error('الجلسة غير جاهزة');
-            return await this.client.getChats();
-        }
-        
-        async destroy() {
-            if (this.client) {
-                await this.client.destroy();
-            }
-            this.status = 'destroyed';
-        }
+    try {
+        const { getWhatsAppManager } = require('./src/whatsappClient');
+        whatsappManager = getWhatsAppManager();
+        console.log('✅ تم تحميل مدير واتساب');
+    } catch (error) {
+        console.log(`⚠️  لم يتم تحميل مدير واتساب: ${error.message}`);
     }
     
-    // فئة مدير الجلسات
-    class WhatsAppManager extends EventEmitter {
-        constructor() {
-            super();
-            this.sessions = new Map();
-            this.adminSessions = new Map();
-        }
-        
-        async createSession(adminId, phoneNumber = null) {
-            const sessionId = `wa_${crypto.randomBytes(8).toString('hex')}`;
-            const session = new WhatsAppSession(sessionId, adminId, phoneNumber);
-            
-            this.sessions.set(sessionId, session);
-            const adminSessions = this.adminSessions.get(adminId) || [];
-            this.adminSessions.set(adminId, [...adminSessions, sessionId]);
-            
-            // تتبع الأحداث
-            session.on('qr', (data) => this.emit('sessionQR', data));
-            session.on('ready', (data) => this.emit('sessionReady', data));
-            
-            return sessionId;
-        }
-        
-        getSession(sessionId) {
-            return this.sessions.get(sessionId);
-        }
-        
-        getReadySessions() {
-            return Array.from(this.sessions.values()).filter(s => s.status === 'ready');
-        }
-        
-        async autoPostAdvertisement(adContent, groups = null, interval = 1000) {
-            const readySessions = this.getReadySessions();
-            if (readySessions.length === 0) throw new Error('لا توجد جلسات جاهزة');
-            
-            const results = { sent: 0, failed: 0, details: [] };
-            const session = readySessions[0];
-            
-            try {
-                const chats = await session.getChats();
-                const groupsToPost = chats.filter(chat => chat.isGroup);
-                
-                for (const [index, group] of groupsToPost.entries()) {
-                    try {
-                        if (index > 0) await new Promise(resolve => setTimeout(resolve, interval));
-                        await session.sendMessage(group.id._serialized, adContent.content);
-                        results.sent++;
-                        results.details.push({ groupId: group.id._serialized, status: 'success' });
-                    } catch (error) {
-                        results.failed++;
-                        results.details.push({ groupId: group.id._serialized, status: 'failed', error: error.message });
-                    }
-                }
-            } catch (error) {
-                throw error;
-            }
-            
-            return results;
-        }
-        
-        getStats() {
-            const totalSessions = this.sessions.size;
-            const readySessions = this.getReadySessions().length;
-            
-            return {
-                totalSessions,
-                readySessions,
-                sessionsByStatus: {
-                    ready: readySessions,
-                    awaiting_qr: Array.from(this.sessions.values()).filter(s => s.status === 'awaiting_qr').length,
-                    disconnected: Array.from(this.sessions.values()).filter(s => s.status === 'disconnected').length
-                }
-            };
-        }
-    }
-    
-    WhatsAppManager = new WhatsAppManager();
-    console.log('✅ تم تحميل مدير واتساب');
+    TelegramBotHandler = new TelegramBotClass(process.env.TELEGRAM_BOT_TOKEN, whatsappManager);
+    console.log('✅ تم تحميل هاندلر تليجرام مع الأزرار');
 } catch (error) {
-    console.log(`⚠️  لم يتم تحميل مدير واتساب: ${error.message}`);
-    WhatsAppManager = null;
+    console.log(`⚠️  لم يتم تحميل هاندلر تليجرام: ${error.message}`);
+    TelegramBotHandler = null;
 }
 
 // ============================================
-// 7. تعريف أوامر تليجرام مباشرة
+// 8. تعريف أوامر تليجرام مباشرة (للنسخ الاحتياطي)
 // ============================================
 console.log('📋 جاري تسجيل أوامر البوت...');
 
@@ -415,51 +491,6 @@ bot.onText(/\/start/, async (msg) => {
     }
 });
 
-// الأمر /help
-bot.onText(/\/help/, (msg) => {
-    const chatId = msg.chat.id;
-    
-    const helpMessage = `
-*🆘 مركز المساعدة*
-
-*🔗 الأوامر الأساسية:*
-/start - بدء استخدام البوت
-/help - عرض هذه الرسالة
-/stats - إحصائيات النظام
-
-*📱 إدارة الجلسات:*
-/sessions - عرض جميع الجلسات
-/sessions add - إضافة جلسة جديدة
-/sessions qr <id> - عرض QR code
-/sessions remove <id> - حذف جلسة
-
-*🔗 جمع الروابط:*
-/links - عرض جميع الروابط
-/links whatsapp - روابط واتساب فقط
-/links telegram - روابط تليجرام فقط
-
-*📢 إدارة الإعلانات:*
-/ads - عرض جميع الإعلانات
-/ads add - إضافة إعلان جديد
-/ads delete <id> - حذف إعلان
-
-*🚀 النشر التلقائي:*
-/autopost - حالة النشر التلقائي
-/autopost start - بدء النشر التلقائي
-/autopost stop - إيقاف النشر التلقائي
-
-*👥 الانضمام التلقائي:*
-/join - حالة الانضمام التلقائي
-/join on - تفعيل الانضمام التلقائي
-/join off - تعطيل الانضمام التلقائي
-
-*📞 الدعم الفني:*
-للإبلاغ عن مشاكل أو اقتراحات
-    `;
-    
-    bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
-});
-
 // الأمر /sessions
 bot.onText(/\/sessions/, async (msg) => {
     const chatId = msg.chat.id;
@@ -513,297 +544,6 @@ bot.onText(/\/sessions/, async (msg) => {
     }
 });
 
-// الأمر /sessions add
-bot.onText(/\/sessions add/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        // التحقق من الحد الأقصى
-        const sessionCount = await WhatsAppSession.count({ where: { adminId: admin.id } });
-        const maxSessions = parseInt(process.env.WHATSAPP_MAX_SESSIONS) || 5;
-        
-        if (sessionCount >= maxSessions) {
-            return bot.sendMessage(chatId,
-                `❌ لقد وصلت للحد الأقصى من الجلسات (${maxSessions}).\n` +
-                `يرجى حذف جلسة قبل إضافة جديدة.`
-            );
-        }
-        
-        // حفظ حالة المستخدم
-        userStates.set(telegramId, {
-            state: 'awaiting_phone',
-            adminId: admin.id
-        });
-        
-        bot.sendMessage(chatId,
-            `🔐 *إضافة جلسة واتساب جديدة*\n\n` +
-            `1. أرسل رقم الهاتف (مع رمز الدولة)\n` +
-            `مثال: +966501234567\n\n` +
-            `2. سأقوم بإرسال QR code لمسحه\n\n` +
-            `3. استخدم /cancel للإلغاء`,
-            { parse_mode: 'Markdown' }
-        );
-        
-    } catch (error) {
-        console.error('خطأ في إضافة جلسة:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الجلسة');
-    }
-});
-
-// الأمر /links
-bot.onText(/\/links/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        const links = await CollectedLink.findAll({
-            order: [['collectedAt', 'DESC']],
-            limit: 10
-        });
-        
-        if (links.length === 0) {
-            return bot.sendMessage(chatId,
-                '🔍 *لا توجد روابط مجمعة*\n\n' +
-                'سيتم جمع الروابط تلقائياً من جلسات واتساب.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-        let message = `*🔗 آخر ${links.length} رابط مجمع*\n\n`;
-        
-        links.forEach((link, index) => {
-            const categoryEmoji = {
-                'whatsapp': '📱',
-                'telegram': '📢',
-                'website': '🌐',
-                'other': '🔗'
-            }[link.category] || '🔗';
-            
-            message += `${index + 1}. ${categoryEmoji} *${link.title || 'بدون عنوان'}*\n`;
-            message += `   ${link.url.substring(0, 50)}${link.url.length > 50 ? '...' : ''}\n`;
-            message += `   📍 ${link.sourceChat || 'غير معروف'}\n\n`;
-        });
-        
-        message += `📊 *الإجمالي:* ${await CollectedLink.count()} رابط\n`;
-        
-        bot.sendMessage(chatId, message, { 
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-        });
-        
-    } catch (error) {
-        console.error('خطأ في /links:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الروابط');
-    }
-});
-
-// الأمر /ads
-bot.onText(/\/ads/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        const ads = await Advertisement.findAll({
-            where: { adminId: admin.id },
-            order: [['createdAt', 'DESC']]
-        });
-        
-        if (ads.length === 0) {
-            return bot.sendMessage(chatId,
-                '📭 *لا توجد إعلانات*\n\n' +
-                'استخدم /ads add لإضافة إعلان جديد.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-        let message = `*📢 إعلاناتك (${ads.length})*\n\n`;
-        
-        ads.forEach((ad, index) => {
-            const typeEmoji = {
-                'text': '📝',
-                'image': '🖼️',
-                'video': '🎥',
-                'contact': '👤',
-                'document': '📄'
-            }[ad.type] || '📢';
-            
-            const statusEmoji = ad.isActive ? '✅' : '❌';
-            
-            message += `${index + 1}. ${typeEmoji} ${statusEmoji}\n`;
-            message += `   ${ad.content.substring(0, 50)}${ad.content.length > 50 ? '...' : ''}\n`;
-            message += `   📊 مرسل: ${ad.stats?.sent || 0}\n\n`;
-        });
-        
-        message += `📌 *أوامر:*\n`;
-        message += `/ads add - إضافة إعلان جديد\n`;
-        message += `/ads post <id> - نشر إعلان\n`;
-        
-        bot.sendMessage(chatId, message, { 
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-        });
-        
-    } catch (error) {
-        console.error('خطأ في /ads:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الإعلانات');
-    }
-});
-
-// الأمر /ads add
-bot.onText(/\/ads add/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        userStates.set(telegramId, {
-            state: 'awaiting_ad_content',
-            adminId: admin.id
-        });
-        
-        bot.sendMessage(chatId,
-            `📢 *إضافة إعلان جديد*\n\n` +
-            `أرسل لي نص الإعلان:\n` +
-            `(يمكنك استخدام Markdown للتنسيق)\n\n` +
-            `❌ للإلغاء: /cancel`,
-            { parse_mode: 'Markdown' }
-        );
-        
-    } catch (error) {
-        console.error('خطأ في /ads add:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الإعلان');
-    }
-});
-
-// الأمر /autopost
-bot.onText(/\/autopost/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        const isActive = activeAutoPosts.has(admin.id);
-        
-        let message = `*🚀 النشر التلقائي*\n\n`;
-        
-        if (isActive) {
-            const postInfo = activeAutoPosts.get(admin.id);
-            message += `✅ *الحالة:* نشط\n`;
-            message += `⏱️ *الفاصل:* ${postInfo.interval}ms\n`;
-            message += `📅 *بدأ في:* ${new Date(postInfo.startedAt).toLocaleTimeString('ar-SA')}\n\n`;
-            message += `🛑 لإيقاف النشر: /autopost stop\n`;
-        } else {
-            message += `❌ *الحالة:* متوقف\n\n`;
-            message += `▶️ لبدء النشر: /autopost start\n`;
-            message += `📋 لعرض الإعلانات: /ads\n`;
-        }
-        
-        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-        
-    } catch (error) {
-        console.error('خطأ في /autopost:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض حالة النشر');
-    }
-});
-
-// الأمر /autopost start
-bot.onText(/\/autopost start/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        if (activeAutoPosts.has(admin.id)) {
-            return bot.sendMessage(chatId,
-                '⚠️ النشر التلقائي يعمل بالفعل!\n' +
-                'استخدم /autopost stop لإيقافه أولاً.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-        const ads = await Advertisement.findAll({
-            where: { 
-                adminId: admin.id,
-                isActive: true 
-            }
-        });
-        
-        if (ads.length === 0) {
-            return bot.sendMessage(chatId,
-                '❌ لا توجد إعلانات نشطة!\n' +
-                'استخدم /ads add لإضافة إعلان أولاً.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-        userStates.set(telegramId, {
-            state: 'select_ad_for_autopost',
-            adminId: admin.id,
-            ads: ads
-        });
-        
-        let message = `*🚀 بدء النشر التلقائي*\n\n`;
-        message += `لديك ${ads.length} إعلان نشط:\n\n`;
-        
-        ads.forEach((ad, index) => {
-            message += `${index + 1}. ${ad.type === 'text' ? '📝' : '🖼️'} ${ad.content.substring(0, 30)}...\n`;
-        });
-        
-        message += `\nأرسل رقم الإعلان الذي تريد نشره:`;
-        
-        bot.sendMessage(chatId, message, { 
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-        });
-        
-    } catch (error) {
-        console.error('خطأ في /autopost start:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في بدء النشر التلقائي');
-    }
-});
-
-// الأمر /join
-bot.onText(/\/join/, async (msg) => {
-    const chatId = msg.chat.id;
-    
-    const message = `
-*👥 الانضمام التلقائي للمجموعات*
-
-✅ *الميزات المتاحة:*
-• الانضمام التلقائي لروابط واتساب
-• استخراج الروابط من الرسائل
-• تجنب المجموعات المغلقة
-
-🔧 *الإعدادات الحالية:*
-• الحالة: ${process.env.AUTO_JOIN_ENABLED === 'true' ? '✅ مفعل' : '❌ معطل'}
-• فحص كل: ${process.env.AUTO_JOIN_CHECK_INTERVAL || 30000}ms
-• تأخير بين المحاولات: ${process.env.AUTO_JOIN_DELAY_BETWEEN || 2000}ms
-
-📌 *الأوامر:*
-/join on - تفعيل الانضمام التلقائي
-/join off - تعطيل الانضمام التلقائي
-/join test <رابط> - اختبار رابط
-    `;
-    
-    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
-});
-
 // الأمر /stats
 bot.onText(/\/stats/, async (msg) => {
     const chatId = msg.chat.id;
@@ -813,7 +553,11 @@ bot.onText(/\/stats/, async (msg) => {
         const admin = await Admin.findOne({ where: { telegramId } });
         if (!admin) return;
         
-        const stats = WhatsAppManager ? WhatsAppManager.getStats() : { totalSessions: 0, readySessions: 0 };
+        let whatsappStats = { totalSessions: 0, readySessions: 0 };
+        if (TelegramBotHandler && TelegramBotHandler.whatsappManager) {
+            whatsappStats = TelegramBotHandler.whatsappManager.getStats();
+        }
+        
         const totalLinks = await CollectedLink.count();
         const totalAds = await Advertisement.count();
         
@@ -821,8 +565,8 @@ bot.onText(/\/stats/, async (msg) => {
 📊 *إحصائيات النظام*
 
 *📱 جلسات واتساب:*
-• الإجمالي: ${stats.totalSessions}
-• النشطة: ${stats.readySessions}
+• الإجمالي: ${whatsappStats.totalSessions}
+• النشطة: ${whatsappStats.readySessions}
 
 *🔗 الروابط المجمعة:*
 • الإجمالي: ${totalLinks}
@@ -848,294 +592,10 @@ bot.onText(/\/stats/, async (msg) => {
     }
 });
 
-// معالجة الرسائل النصية
-bot.on('message', async (msg) => {
-    if (msg.text && msg.text.startsWith('/')) return;
-    
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    const userState = userStates.get(telegramId);
-    
-    if (!userState || !msg.text) return;
-    
-    try {
-        switch (userState.state) {
-            case 'awaiting_phone':
-                await handlePhoneNumber(msg, userState, chatId);
-                break;
-                
-            case 'awaiting_ad_content':
-                await handleAdContent(msg, userState, chatId);
-                break;
-                
-            case 'select_ad_for_autopost':
-                await handleAdSelection(msg, userState, chatId);
-                break;
-        }
-    } catch (error) {
-        console.error('خطأ في معالجة الرسالة:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في المعالجة');
-        userStates.delete(telegramId);
-    }
-});
-
-// معالجة رقم الهاتف
-async function handlePhoneNumber(msg, userState, chatId) {
-    const phoneNumber = msg.text.trim();
-    const phoneRegex = /^\+[1-9]\d{1,14}$/;
-    
-    if (!phoneRegex.test(phoneNumber)) {
-        return bot.sendMessage(chatId,
-            '❌ رقم الهاتف غير صالح.\n' +
-            'يجب أن يبدأ بـ + ويتبعه رمز الدولة ثم الرقم.\n' +
-            'مثال: +966501234567\n\n' +
-            'حاول مرة أخرى أو /cancel للإلغاء'
-        );
-    }
-    
-    try {
-        if (!WhatsAppManager) {
-            throw new Error('مدير واتساب غير متاح');
-        }
-        
-        const sessionId = await WhatsAppManager.createSession(userState.adminId, phoneNumber);
-        
-        // حفظ في قاعدة البيانات
-        await WhatsAppSession.create({
-            id: sessionId,
-            sessionId: sessionId,
-            phoneNumber: phoneNumber,
-            adminId: userState.adminId,
-            status: 'pending'
-        });
-        
-        bot.sendMessage(chatId,
-            `✅ *تم إنشاء الجلسة*\n\n` +
-            `🆔 المعرف: \`${sessionId.substring(0, 8)}\`\n` +
-            `📱 الرقم: ${phoneNumber}\n\n` +
-            `⏳ جاري تحضير QR code...`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        // الاستماع لحدث QR
-        WhatsAppManager.once('sessionQR', (data) => {
-            if (data.sessionId === sessionId) {
-                bot.sendMessage(chatId,
-                    `📱 *QR Code جاهز*\n\n` +
-                    `1. افتح واتساب على هاتفك\n` +
-                    `2. اذهب إلى الإعدادات → الأجهزة المرتبطة\n` +
-                    `3. انقر على "ربط جهاز"\n` +
-                    `4. مسح QR Code التالي:\n\n` +
-                    `\`\`\`\n${data.qrCode}\n\`\`\``,
-                    { parse_mode: 'Markdown' }
-                );
-            }
-        });
-        
-        userStates.delete(msg.from.id.toString());
-        
-    } catch (error) {
-        console.error('خطأ في إنشاء الجلسة:', error);
-        bot.sendMessage(chatId,
-            `❌ *فشل إنشاء الجلسة!*\n\n` +
-            `الخطأ: ${error.message}\n\n` +
-            `حاول مرة أخرى.`,
-            { parse_mode: 'Markdown' }
-        );
-        userStates.delete(msg.from.id.toString());
-    }
-}
-
-// معالجة محتوى الإعلان
-async function handleAdContent(msg, userState, chatId) {
-    const content = msg.text;
-    
-    try {
-        const ad = await Advertisement.create({
-            adminId: userState.adminId,
-            type: 'text',
-            content: content,
-            isActive: true,
-            stats: { sent: 0, failed: 0 }
-        });
-        
-        bot.sendMessage(chatId,
-            `✅ *تم إضافة الإعلان بنجاح!*\n\n` +
-            `🆔 المعرف: \`${ad.id}\`\n` +
-            `📝 النوع: ${ad.type}\n` +
-            `📄 المحتوى: ${content.substring(0, 50)}...\n\n` +
-            `⚡ يمكنك نشره الآن باستخدام:\n` +
-            `/ads post ${ad.id}`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        userStates.delete(msg.from.id.toString());
-        
-    } catch (error) {
-        console.error('خطأ في إضافة الإعلان:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الإعلان');
-        userStates.delete(msg.from.id.toString());
-    }
-}
-
-// معالجة اختيار الإعلان للنشر التلقائي
-async function handleAdSelection(msg, userState, chatId) {
-    const selection = parseInt(msg.text);
-    
-    if (isNaN(selection) || selection < 1 || selection > userState.ads.length) {
-        return bot.sendMessage(chatId,
-            '❌ رقم غير صحيح!\n\n' +
-            `يرجى إرسال رقم بين 1 و ${userState.ads.length}\n` +
-            'أو /cancel للإلغاء',
-            { parse_mode: 'Markdown' }
-        );
-    }
-    
-    const selectedAd = userState.ads[selection - 1];
-    const interval = parseInt(process.env.AUTO_POST_INTERVAL) || 1000;
-    
-    // بدء النشر التلقائي
-    const autoPostJob = {
-        adminId: userState.adminId,
-        adId: selectedAd.id,
-        interval: interval,
-        startedAt: new Date(),
-        timer: null,
-        isRunning: true
-    };
-    
-    autoPostJob.timer = setInterval(async () => {
-        if (!autoPostJob.isRunning || !WhatsAppManager) return;
-        
-        try {
-            const ad = await Advertisement.findByPk(selectedAd.id);
-            if (!ad || !ad.isActive) {
-                clearInterval(autoPostJob.timer);
-                activeAutoPosts.delete(userState.adminId);
-                return;
-            }
-            
-            const results = await WhatsAppManager.autoPostAdvertisement(
-                { content: ad.content },
-                null,
-                interval
-            );
-            
-            // تحديث إحصائيات الإعلان
-            ad.stats.sent = (ad.stats.sent || 0) + results.sent;
-            ad.stats.failed = (ad.stats.failed || 0) + results.failed;
-            await ad.save();
-            
-        } catch (error) {
-            console.error('خطأ في النشر التلقائي:', error);
-        }
-    }, interval);
-    
-    activeAutoPosts.set(userState.adminId, autoPostJob);
-    
-    bot.sendMessage(chatId,
-        `🚀 *بدأ النشر التلقائي!*\n\n` +
-        `📢 الإعلان: ${selectedAd.content.substring(0, 50)}...\n` +
-        `⏱️ الفاصل: ${interval}ms\n\n` +
-        `🔧 للتحكم:\n` +
-        `/autopost stop - لإيقاف النشر\n` +
-        `/autopost - لعرض الحالة`,
-        { parse_mode: 'Markdown' }
-    );
-    
-    userStates.delete(msg.from.id.toString());
-}
-
-// الأمر /autopost stop
-bot.onText(/\/autopost stop/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        const autoPostJob = activeAutoPosts.get(admin.id);
-        
-        if (autoPostJob && autoPostJob.timer) {
-            clearInterval(autoPostJob.timer);
-            autoPostJob.isRunning = false;
-            activeAutoPosts.delete(admin.id);
-            
-            bot.sendMessage(chatId,
-                '🛑 *تم إيقاف النشر التلقائي*\n\n' +
-                'تم إيقاف جميع عمليات النشر التلقائي.',
-                { parse_mode: 'Markdown' }
-            );
-        } else {
-            bot.sendMessage(chatId,
-                'ℹ️ لا يوجد نشر تلقائي نشط لإيقافه.',
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-    } catch (error) {
-        console.error('خطأ في /autopost stop:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في إيقاف النشر');
-    }
-});
-
-// الأمر /cancel
-bot.onText(/\/cancel/, (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    userStates.delete(telegramId);
-    bot.sendMessage(chatId, '❌ تم إلغاء العملية الحالية.');
-});
-
 // ============================================
-// 8. المهام المجدولة
+// 9. المهام المجدولة
 // ============================================
 function setupScheduledTasks() {
-    // مهمة جمع الروابط كل 10 دقائق
-    cron.schedule('*/10 * * * *', async () => {
-        if (!WhatsAppManager) return;
-        
-        try {
-            const readySessions = WhatsAppManager.getReadySessions();
-            
-            for (const session of readySessions) {
-                try {
-                    const chats = await session.getChats();
-                    
-                    for (const chat of chats.slice(0, 5)) {
-                        // محاكاة جمع الروابط
-                        const mockLinks = [
-                            { url: 'https://chat.whatsapp.com/ABC123', chatName: chat.name },
-                            { url: 'https://t.me/group123', chatName: chat.name }
-                        ];
-                        
-                        for (const link of mockLinks) {
-                            await CollectedLink.findOrCreate({
-                                where: { url: link.url },
-                                defaults: {
-                                    url: link.url,
-                                    category: link.url.includes('whatsapp') ? 'whatsapp' : 
-                                             link.url.includes('t.me') ? 'telegram' : 'website',
-                                    title: `رابط من ${chat.name}`,
-                                    sourceChat: chat.name,
-                                    sessionId: session.sessionId
-                                }
-                            });
-                        }
-                    }
-                    
-                    console.log(`جمع الروابط من جلسة ${session.sessionId.substring(0, 8)}`);
-                } catch (error) {
-                    console.error(`خطأ في جمع الروابط: ${error.message}`);
-                }
-            }
-        } catch (error) {
-            console.error(`خطأ في مهمة جمع الروابط: ${error.message}`);
-        }
-    });
-    
     // مهمة تنظيف الجلسات كل ساعة
     cron.schedule('0 * * * *', async () => {
         try {
@@ -1162,11 +622,35 @@ function setupScheduledTasks() {
         }
     });
     
+    // مهمة حفظ الإحصائيات كل 30 دقيقة
+    cron.schedule('*/30 * * * *', async () => {
+        try {
+            const stats = {
+                totalSessions: await WhatsAppSession.count(),
+                activeSessions: await WhatsAppSession.count({ where: { status: 'active' } }),
+                totalLinks: await CollectedLink.count(),
+                totalAds: await Advertisement.count(),
+                timestamp: new Date().toISOString()
+            };
+            
+            console.log('📊 إحصائيات دورية:', stats);
+            
+            // حفظ في ملف للرجوع إليه
+            const statsDir = path.join(__dirname, 'logs');
+            await fs.mkdir(statsDir, { recursive: true });
+            const statsFile = path.join(statsDir, 'system_stats.json');
+            await fs.writeFile(statsFile, JSON.stringify(stats, null, 2));
+            
+        } catch (error) {
+            console.error(`خطأ في حفظ الإحصائيات: ${error.message}`);
+        }
+    });
+    
     console.log('✅ تم إعداد المهام المجدولة');
 }
 
 // ============================================
-// 9. وظيفة البدء الرئيسية
+// 10. وظيفة البدء الرئيسية
 // ============================================
 async function startBot() {
     console.log('\n🔧 جاري تهيئة النظام...');
@@ -1175,7 +659,7 @@ async function startBot() {
     const dbInitialized = await initializeDatabase();
     if (!dbInitialized) {
         console.log('❌ فشل تهيئة قاعدة البيانات');
-        process.exit(1);
+        // نستمر مع أن النظام قد يعمل جزئياً
     }
     
     // 2. إنشاء مجلدات ضرورية
@@ -1191,15 +675,33 @@ async function startBot() {
     // 3. إعداد المهام المجدولة
     setupScheduledTasks();
     
-    // 4. رسالة البدء النهائية
+    // 4. بدء هاندلر تليجرام إذا كان متاحاً
+    if (TelegramBotHandler) {
+        try {
+            TelegramBotHandler.start();
+            console.log('✅ بدء هاندلر تليجرام مع الأزرار');
+        } catch (error) {
+            console.log(`❌ خطأ في بدء هاندلر تليجرام: ${error.message}`);
+        }
+    }
+    
+    // 5. بدء سيرفر Express
+    app.listen(PORT, () => {
+        console.log(`🌐 سيرفر Express يعمل على المنفذ ${PORT}`);
+        console.log(`🔗 رابط الصحة: http://localhost:${PORT}/health`);
+        console.log(`🏠 الصفحة الرئيسية: http://localhost:${PORT}/`);
+    });
+    
+    // 6. رسالة البدء النهائية
     console.log('\n✅ ✅ ✅ البوت يعمل بنجاح! ✅ ✅ ✅');
     console.log('=========================================');
     console.log('🤖 البوت: جاهز لاستقبال الأوامر');
     console.log(`📊 المشرفين: ${process.env.TELEGRAM_ADMIN_IDS.split(',').length}`);
+    console.log(`🌐 Web Service: http://localhost:${PORT}`);
     console.log(`⏱️  المهام المجدولة: 2 مهام نشطة`);
     console.log('=========================================');
     
-    // 5. إرسال رسالة للمشرفين
+    // 7. إرسال رسالة للمشرفين
     const adminIds = process.env.TELEGRAM_ADMIN_IDS.split(',');
     for (const adminId of adminIds) {
         try {
@@ -1207,6 +709,7 @@ async function startBot() {
                 '🚀 *البوت يعمل الآن!*\n\n' +
                 '✅ تم تشغيل بوت إدارة واتساب بنجاح.\n' +
                 '📊 قاعدة البيانات: جاهزة\n' +
+                '🌐 Web Service: نشط\n' +
                 '🔧 جميع المكونات: نشطة\n\n' +
                 'استخدم /start للبدء أو /help للمساعدة.',
                 { parse_mode: 'Markdown' }
@@ -1218,7 +721,13 @@ async function startBot() {
 }
 
 // ============================================
-// 10. التعامل مع إيقاف التشغيل
+// 11. إعدادات Render الخاصة
+// ============================================
+// Render يمرر المنفذ عبر متغير البيئة PORT
+// تأكد من إضافة هذا المتغير في إعدادات Render
+
+// ============================================
+// 12. التعامل مع إيقاف التشغيل
 // ============================================
 process.on('SIGINT', async () => {
     console.log('\n🛑 تلقي إشارة إيقاف...');
@@ -1242,7 +751,18 @@ process.on('SIGINT', async () => {
 });
 
 // ============================================
-// 11. بدء التشغيل
+// 13. التعامل مع الأخطاء غير المعالجة
+// ============================================
+process.on('unhandledRejection', (error) => {
+    console.error(`❌ رفض غير معالج: ${error.message}`);
+});
+
+process.on('uncaughtException', (error) => {
+    console.error(`❌ استثناء غير معالج: ${error.message}`);
+});
+
+// ============================================
+// 14. بدء التشغيل
 // ============================================
 if (require.main === module) {
     startBot().catch(error => {
@@ -1252,10 +772,12 @@ if (require.main === module) {
 }
 
 // ============================================
-// 12. التصدير
+// 15. التصدير للاستخدام في الاختبارات
 // ============================================
 module.exports = {
+    app,
     bot,
+    sequelize,
     Admin,
     WhatsAppSession,
     CollectedLink,
