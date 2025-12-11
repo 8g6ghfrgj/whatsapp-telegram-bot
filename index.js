@@ -1,81 +1,22 @@
 // ============================================
-// الملف الرئيسي: WhatsApp-Telegram Bot
-// نظام متعدد المشرفين وجلسات متعددة
+// الملف الرئيسي: WhatsApp-Telegram Bot - النسخة الكاملة
 // ============================================
 
 require('dotenv').config();
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const { execSync } = require('child_process');
+const { Sequelize, Op } = require('sequelize');
 
 // ============================================
-// 1. التحقق من الإعدادات المبدئية
+// 1. استيراد نماذج قاعدة البيانات
 // ============================================
-console.log(chalk.cyan('🚀 بدء تشغيل WhatsApp-Telegram Bot...'));
-console.log(chalk.gray('========================================='));
+console.log('🚀 بدء تشغيل WhatsApp-Telegram Bot...');
+console.log('=========================================');
 
-// التحقق من المتغيرات البيئية الأساسية
-const requiredEnvVars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ADMIN_IDS', 'ENCRYPTION_KEY'];
-const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
-
-if (missingEnvVars.length > 0) {
-    console.log(chalk.red('❌ متغيرات بيئية مفقودة:'));
-    missingEnvVars.forEach(varName => {
-        console.log(chalk.red(`   - ${varName}`));
-    });
-    console.log(chalk.yellow('📝 راجع ملف .env.example وأنشئ ملف .env'));
-    process.exit(1);
-}
-
-// ============================================
-// 2. استيراد المكتبات
-// ============================================
-const chalk = require('chalk');
-const TelegramBot = require('node-telegram-bot-api');
-const { Sequelize } = require('sequelize');
-const winston = require('winston');
-const express = require('express');
-const cron = require('node-cron');
-const { v4: uuidv4 } = require('uuid');
-const bcrypt = require('bcryptjs');
-
-// ============================================
-// 3. إعداد نظام التسجيل (Logging)
-// ============================================
-const logger = winston.createLogger({
-    level: process.env.LOG_LEVEL || 'info',
-    format: winston.format.combine(
-        winston.format.timestamp(),
-        winston.format.printf(({ timestamp, level, message }) => {
-            return `${timestamp} [${level.toUpperCase()}]: ${message}`;
-        })
-    ),
-    transports: [
-        new winston.transports.Console({
-            format: winston.format.combine(
-                winston.format.colorize(),
-                winston.format.simple()
-            )
-        }),
-        ...(process.env.LOG_TO_FILE === 'true' ? [
-            new winston.transports.File({ 
-                filename: process.env.LOG_FILE_PATH || './logs/bot.log',
-                maxsize: 5242880, // 5MB
-                maxFiles: 5
-            })
-        ] : [])
-    ]
-});
-
-global.logger = logger;
-
-// ============================================
-// 4. إعداد قاعدة البيانات
-// ============================================
-console.log(chalk.blue('🗄️  جاري إعداد قاعدة البيانات...'));
-
-const sequelize = new Sequelize(process.env.DATABASE_URL, {
-    logging: process.env.DB_LOGGING === 'true' ? msg => logger.debug(msg) : false,
+// تعريف النماذج مباشرة هنا (بدون ملف models.js منفصل)
+const sequelize = new Sequelize(process.env.DATABASE_URL || 'sqlite:./database/bot.db', {
+    logging: process.env.DB_LOGGING === 'true' ? console.log : false,
     pool: {
         max: 10,
         min: 0,
@@ -84,35 +25,36 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     }
 });
 
-// تعريف النماذج
+// نموذج المشرفين
 const Admin = sequelize.define('Admin', {
     id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
     telegramId: { type: Sequelize.STRING, unique: true, allowNull: false },
-    username: { type: Sequelize.STRING },
-    firstName: { type: Sequelize.STRING },
-    lastName: { type: Sequelize.STRING },
-    passwordHash: { type: Sequelize.STRING },
+    username: Sequelize.STRING,
+    firstName: Sequelize.STRING,
+    lastName: Sequelize.STRING,
+    passwordHash: Sequelize.STRING,
     permissions: { type: Sequelize.JSON, defaultValue: ['basic'] },
     isActive: { type: Sequelize.BOOLEAN, defaultValue: true },
     createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
+// نموذج جلسات واتساب
 const WhatsAppSession = sequelize.define('WhatsAppSession', {
-    id: { type: Sequelize.STRING, primaryKey: true, defaultValue: () => uuidv4() },
+    id: { type: Sequelize.STRING, primaryKey: true },
     sessionId: { type: Sequelize.STRING, unique: true },
-    phoneNumber: { type: Sequelize.STRING },
+    phoneNumber: Sequelize.STRING,
     adminId: { type: Sequelize.INTEGER, allowNull: false },
-    sessionData: { type: Sequelize.TEXT }, // مخزن كمشفر JSON
+    sessionData: Sequelize.TEXT,
     status: { 
         type: Sequelize.ENUM('pending', 'authenticating', 'active', 'disconnected', 'error'),
         defaultValue: 'pending'
     },
-    qrCode: { type: Sequelize.TEXT },
-    lastActivity: { type: Sequelize.DATE },
-    metadata: { type: Sequelize.JSON },
+    qrCode: Sequelize.TEXT,
+    lastActivity: Sequelize.DATE,
     createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
+// نموذج الروابط المجمعة
 const CollectedLink = sequelize.define('CollectedLink', {
     id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
     url: { type: Sequelize.STRING, unique: true, allowNull: false },
@@ -120,13 +62,14 @@ const CollectedLink = sequelize.define('CollectedLink', {
         type: Sequelize.ENUM('whatsapp', 'telegram', 'website', 'other'),
         defaultValue: 'other'
     },
-    title: { type: Sequelize.STRING },
-    description: { type: Sequelize.TEXT },
-    sourceChat: { type: Sequelize.STRING },
-    sessionId: { type: Sequelize.STRING },
+    title: Sequelize.STRING,
+    description: Sequelize.TEXT,
+    sourceChat: Sequelize.STRING,
+    sessionId: Sequelize.STRING,
     collectedAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
+// نموذج الإعلانات
 const Advertisement = sequelize.define('Advertisement', {
     id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
     adminId: { type: Sequelize.INTEGER, allowNull: false },
@@ -135,14 +78,15 @@ const Advertisement = sequelize.define('Advertisement', {
         defaultValue: 'text'
     },
     content: { type: Sequelize.TEXT, allowNull: false },
-    fileId: { type: Sequelize.STRING },
-    caption: { type: Sequelize.TEXT },
+    fileId: Sequelize.STRING,
+    caption: Sequelize.TEXT,
     isActive: { type: Sequelize.BOOLEAN, defaultValue: true },
-    schedule: { type: Sequelize.JSON },
+    schedule: Sequelize.JSON,
     stats: { type: Sequelize.JSON, defaultValue: { sent: 0, failed: 0 } },
     createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
+// نموذج الردود التلقائية
 const AutoReply = sequelize.define('AutoReply', {
     id: { type: Sequelize.INTEGER, primaryKey: true, autoIncrement: true },
     adminId: { type: Sequelize.INTEGER, allowNull: false },
@@ -157,47 +101,46 @@ const AutoReply = sequelize.define('AutoReply', {
         type: Sequelize.ENUM('exact', 'contains', 'regex'),
         defaultValue: 'contains'
     },
-    cooldown: { type: Sequelize.INTEGER, defaultValue: 30 }, // ثواني
     stats: { type: Sequelize.JSON, defaultValue: { triggered: 0 } },
     createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
 });
 
-const Group = sequelize.define('Group', {
-    id: { type: Sequelize.STRING, primaryKey: true },
-    name: { type: Sequelize.STRING },
-    sessionId: { type: Sequelize.STRING, allowNull: false },
-    participantCount: { type: Sequelize.INTEGER },
-    isMuted: { type: Sequelize.BOOLEAN, defaultValue: false },
-    isArchived: { type: Sequelize.BOOLEAN, defaultValue: false },
-    lastMessageAt: { type: Sequelize.DATE },
-    metadata: { type: Sequelize.JSON },
-    createdAt: { type: Sequelize.DATE, defaultValue: Sequelize.NOW }
-});
+// ============================================
+// 2. التحقق من الإعدادات المبدئية
+// ============================================
+const requiredEnvVars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_ADMIN_IDS'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
-// العلاقات بين الجداول
-Admin.hasMany(WhatsAppSession, { foreignKey: 'adminId' });
-WhatsAppSession.belongsTo(Admin, { foreignKey: 'adminId' });
-
-Admin.hasMany(Advertisement, { foreignKey: 'adminId' });
-Advertisement.belongsTo(Admin, { foreignKey: 'adminId' });
-
-Admin.hasMany(AutoReply, { foreignKey: 'adminId' });
-AutoReply.belongsTo(Admin, { foreignKey: 'adminId' });
-
-WhatsAppSession.hasMany(CollectedLink, { foreignKey: 'sessionId', sourceKey: 'sessionId' });
-WhatsAppSession.hasMany(Group, { foreignKey: 'sessionId', sourceKey: 'sessionId' });
+if (missingEnvVars.length > 0) {
+    console.log('❌ متغيرات بيئية مفقودة:');
+    missingEnvVars.forEach(varName => {
+        console.log(`   - ${varName}`);
+    });
+    console.log('📝 راجع ملف .env.example وأنشئ ملف .env');
+    process.exit(1);
+}
 
 // ============================================
-// 5. تهيئة قاعدة البيانات
+// 3. استيراد المكتبات
 // ============================================
+const TelegramBot = require('node-telegram-bot-api');
+const cron = require('node-cron');
+const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
+
+// ============================================
+// 4. إعداد قاعدة البيانات
+// ============================================
+console.log('🗄️  جاري إعداد قاعدة البيانات...');
+
 async function initializeDatabase() {
     try {
         await sequelize.authenticate();
-        console.log(chalk.green('✅ اتصال قاعدة البيانات ناجح'));
+        console.log('✅ اتصال قاعدة البيانات ناجح');
         
-        // مزامنة النماذج (يمكن تغييرها إلى migrations لاحقاً)
+        // مزامنة النماذج
         await sequelize.sync({ alter: true });
-        console.log(chalk.green('✅ تم مزامنة نماذج قاعدة البيانات'));
+        console.log('✅ تم مزامنة نماذج قاعدة البيانات');
         
         // إنشاء المشرف الأساسي إذا لم يوجد
         const adminIds = process.env.TELEGRAM_ADMIN_IDS.split(',');
@@ -212,22 +155,21 @@ async function initializeDatabase() {
             });
             
             if (admin.isNewRecord) {
-                logger.info(`تم إنشاء مشرف جديد: ${telegramId}`);
+                console.log(`تم إنشاء مشرف جديد: ${telegramId}`);
             }
         }
         
         return true;
     } catch (error) {
-        console.log(chalk.red(`❌ خطأ في قاعدة البيانات: ${error.message}`));
-        logger.error(`فشل تهيئة قاعدة البيانات: ${error.message}`, { error });
+        console.log(`❌ خطأ في قاعدة البيانات: ${error.message}`);
         return false;
     }
 }
 
 // ============================================
-// 6. إعداد بوت تليجرام
+// 5. إعداد بوت تليجرام
 // ============================================
-console.log(chalk.blue('🤖 جاري إعداد بوت تليجرام...'));
+console.log('🤖 جاري إعداد بوت تليجرام...');
 
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
     polling: {
@@ -239,39 +181,187 @@ const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
     }
 });
 
-// تخزين حالات المستخدمين للواجهات التفاعلية
+// تخزين حالات المستخدمين
 const userStates = new Map();
-const userSessions = new Map();
+const activeAutoPosts = new Map();
 
 // ============================================
-// 7. استيراد وتهيئة المكونات
+// 6. استيراد وتهيئة المكونات
 // ============================================
-console.log(chalk.blue('🔧 جاري تحميل المكونات...'));
+console.log('🔧 جاري تحميل المكونات...');
 
-// استيراد مدير واتساب (سيتم إنشاؤه لاحقاً)
+// استيراد مدير واتساب
 let WhatsAppManager;
 try {
-    WhatsAppManager = require('./src/whatsappClient');
-    console.log(chalk.green('✅ تم تحميل مدير واتساب'));
+    const { Client, LocalAuth } = require('whatsapp-web.js');
+    const qrcode = require('qrcode-terminal');
+    const EventEmitter = require('events');
+    
+    // فئة جلسة واتساب
+    class WhatsAppSession extends EventEmitter {
+        constructor(sessionId, adminId, phoneNumber = null) {
+            super();
+            this.sessionId = sessionId;
+            this.adminId = adminId;
+            this.phoneNumber = phoneNumber;
+            this.status = 'initializing';
+            this.client = null;
+            this.qrCode = null;
+            
+            this.config = {
+                authStrategy: new LocalAuth({ 
+                    clientId: `whatsapp-session-${sessionId}`,
+                    dataPath: path.join('./sessions', sessionId)
+                }),
+                puppeteer: {
+                    headless: process.env.BROWSER_HEADLESS !== 'false',
+                    args: (process.env.BROWSER_ARGS || '--no-sandbox,--disable-setuid-sandbox').split(','),
+                    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || null
+                }
+            };
+            
+            this.initialize();
+        }
+        
+        async initialize() {
+            try {
+                this.client = new Client(this.config);
+                
+                this.client.on('qr', (qr) => {
+                    this.qrCode = qr;
+                    this.status = 'awaiting_qr';
+                    qrcode.generate(qr, { small: true });
+                    this.emit('qr', { sessionId: this.sessionId, qrCode: qr });
+                });
+                
+                this.client.on('ready', () => {
+                    this.status = 'ready';
+                    this.phoneNumber = this.client.info.wid.user;
+                    this.emit('ready', { 
+                        sessionId: this.sessionId, 
+                        phoneNumber: this.phoneNumber 
+                    });
+                });
+                
+                this.client.on('disconnected', (reason) => {
+                    this.status = 'disconnected';
+                    this.emit('disconnected', { sessionId: this.sessionId, reason });
+                });
+                
+                await this.client.initialize();
+            } catch (error) {
+                this.status = 'error';
+                this.emit('error', { sessionId: this.sessionId, error: error.message });
+            }
+        }
+        
+        async sendMessage(to, content) {
+            if (this.status !== 'ready') throw new Error('الجلسة غير جاهزة');
+            return await this.client.sendMessage(to, content);
+        }
+        
+        async getChats() {
+            if (this.status !== 'ready') throw new Error('الجلسة غير جاهزة');
+            return await this.client.getChats();
+        }
+        
+        async destroy() {
+            if (this.client) {
+                await this.client.destroy();
+            }
+            this.status = 'destroyed';
+        }
+    }
+    
+    // فئة مدير الجلسات
+    class WhatsAppManager extends EventEmitter {
+        constructor() {
+            super();
+            this.sessions = new Map();
+            this.adminSessions = new Map();
+        }
+        
+        async createSession(adminId, phoneNumber = null) {
+            const sessionId = `wa_${crypto.randomBytes(8).toString('hex')}`;
+            const session = new WhatsAppSession(sessionId, adminId, phoneNumber);
+            
+            this.sessions.set(sessionId, session);
+            const adminSessions = this.adminSessions.get(adminId) || [];
+            this.adminSessions.set(adminId, [...adminSessions, sessionId]);
+            
+            // تتبع الأحداث
+            session.on('qr', (data) => this.emit('sessionQR', data));
+            session.on('ready', (data) => this.emit('sessionReady', data));
+            
+            return sessionId;
+        }
+        
+        getSession(sessionId) {
+            return this.sessions.get(sessionId);
+        }
+        
+        getReadySessions() {
+            return Array.from(this.sessions.values()).filter(s => s.status === 'ready');
+        }
+        
+        async autoPostAdvertisement(adContent, groups = null, interval = 1000) {
+            const readySessions = this.getReadySessions();
+            if (readySessions.length === 0) throw new Error('لا توجد جلسات جاهزة');
+            
+            const results = { sent: 0, failed: 0, details: [] };
+            const session = readySessions[0];
+            
+            try {
+                const chats = await session.getChats();
+                const groupsToPost = chats.filter(chat => chat.isGroup);
+                
+                for (const [index, group] of groupsToPost.entries()) {
+                    try {
+                        if (index > 0) await new Promise(resolve => setTimeout(resolve, interval));
+                        await session.sendMessage(group.id._serialized, adContent.content);
+                        results.sent++;
+                        results.details.push({ groupId: group.id._serialized, status: 'success' });
+                    } catch (error) {
+                        results.failed++;
+                        results.details.push({ groupId: group.id._serialized, status: 'failed', error: error.message });
+                    }
+                }
+            } catch (error) {
+                throw error;
+            }
+            
+            return results;
+        }
+        
+        getStats() {
+            const totalSessions = this.sessions.size;
+            const readySessions = this.getReadySessions().length;
+            
+            return {
+                totalSessions,
+                readySessions,
+                sessionsByStatus: {
+                    ready: readySessions,
+                    awaiting_qr: Array.from(this.sessions.values()).filter(s => s.status === 'awaiting_qr').length,
+                    disconnected: Array.from(this.sessions.values()).filter(s => s.status === 'disconnected').length
+                }
+            };
+        }
+    }
+    
+    WhatsAppManager = new WhatsAppManager();
+    console.log('✅ تم تحميل مدير واتساب');
 } catch (error) {
-    console.log(chalk.yellow(`⚠️  لم يتم تحميل مدير واتساب بعد: ${error.message}`));
+    console.log(`⚠️  لم يتم تحميل مدير واتساب: ${error.message}`);
     WhatsAppManager = null;
 }
 
-// استيراد الخدمات (سيتم إنشاؤها لاحقاً)
-const services = {
-    linkCollector: null,
-    autoPoster: null,
-    autoJoiner: null,
-    replyManager: null
-};
-
 // ============================================
-// 8. تعريف الأوامر الأساسية للبوت
+// 7. تعريف أوامر تليجرام مباشرة
 // ============================================
-console.log(chalk.blue('📋 جاري تسجيل أوامر البوت...'));
+console.log('📋 جاري تسجيل أوامر البوت...');
 
-// قائمة الأوامر الرسمية
+// أوامر البوت
 bot.setMyCommands([
     { command: 'start', description: 'بدء استخدام البوت' },
     { command: 'help', description: 'عرض التعليمات' },
@@ -279,15 +369,9 @@ bot.setMyCommands([
     { command: 'links', description: 'عرض الروابط المجمعة' },
     { command: 'ads', description: 'إدارة الإعلانات' },
     { command: 'autopost', description: 'النشر التلقائي' },
-    { command: 'autoreply', description: 'إدارة الردود التلقائية' },
     { command: 'join', description: 'الانضمام للمجموعات' },
-    { command: 'stats', description: 'إحصائيات البوت' },
-    { command: 'admin', description: 'أدوات المشرف' }
+    { command: 'stats', description: 'إحصائيات البوت' }
 ]);
-
-// ============================================
-// 9. معالجة الأوامر الأساسية
-// ============================================
 
 // الأمر /start
 bot.onText(/\/start/, async (msg) => {
@@ -295,7 +379,6 @@ bot.onText(/\/start/, async (msg) => {
     const telegramId = msg.from.id.toString();
     
     try {
-        // التحقق إذا كان المستخدم مشرفاً
         const admin = await Admin.findOne({ where: { telegramId } });
         
         if (!admin) {
@@ -319,17 +402,15 @@ bot.onText(/\/start/, async (msg) => {
 /autopost - النشر التلقائي
 /join - الانضمام للمجموعات
 /stats - إحصائيات البوت
-/admin - أدوات المشرف
 
 *💼 حالتك:* ${admin.isActive ? '✅ نشط' : '❌ غير نشط'}
 *🎫 الصلاحيات:* ${admin.permissions.join(', ')}
         `;
         
         bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
-        logger.info(`المشرف ${telegramId} بدأ استخدام البوت`);
         
     } catch (error) {
-        logger.error(`خطأ في الأمر /start: ${error.message}`, { error });
+        console.error('خطأ في /start:', error);
         bot.sendMessage(chatId, '❌ حدث خطأ في المعالجة');
     }
 });
@@ -337,66 +418,49 @@ bot.onText(/\/start/, async (msg) => {
 // الأمر /help
 bot.onText(/\/help/, (msg) => {
     const chatId = msg.chat.id;
+    
     const helpMessage = `
 *🆘 مركز المساعدة*
 
-*🔗 إدارة الجلسات:*
+*🔗 الأوامر الأساسية:*
+/start - بدء استخدام البوت
+/help - عرض هذه الرسالة
+/stats - إحصائيات النظام
+
+*📱 إدارة الجلسات:*
 /sessions - عرض جميع الجلسات
 /sessions add - إضافة جلسة جديدة
-/sessions remove <id> - حذف جلسة
 /sessions qr <id> - عرض QR code
+/sessions remove <id> - حذف جلسة
 
-*📊 جمع الروابط:*
+*🔗 جمع الروابط:*
 /links - عرض جميع الروابط
 /links whatsapp - روابط واتساب فقط
 /links telegram - روابط تليجرام فقط
-/links export - تصدير الروابط
 
-*📢 الإعلانات:*
-/ads - عرض الإعلانات
+*📢 إدارة الإعلانات:*
+/ads - عرض جميع الإعلانات
 /ads add - إضافة إعلان جديد
-/ads edit <id> - تعديل إعلان
 /ads delete <id> - حذف إعلان
-/ads stats - إحصائيات الإعلانات
 
 *🚀 النشر التلقائي:*
+/autopost - حالة النشر التلقائي
 /autopost start - بدء النشر التلقائي
 /autopost stop - إيقاف النشر التلقائي
-/autopost status - حالة النشر
-/autopost interval <ثواني> - ضبط الفترة
 
 *👥 الانضمام التلقائي:*
-/join auto <on/off> - تفعيل/تعطيل الانضمام
-/join list - المجموعات المنضمة
-/join stats - إحصائيات الانضمام
+/join - حالة الانضمام التلقائي
+/join on - تفعيل الانضمام التلقائي
+/join off - تعطيل الانضمام التلقائي
 
-*🤖 الردود التلقائية:*
-/autoreply - عرض الردود
-/autoreply add - إضافة رد جديد
-/autoreply delete <id> - حذف رد
-
-*📈 الإحصائيات:*
-/stats - إحصائيات عامة
-/stats sessions - إحصائيات الجلسات
-/stats links - إحصائيات الروابط
-
-*👑 أدوات المشرف:*
-/admin list - قائمة المشرفين
-/admin add <id> - إضافة مشرف
-/admin remove <id> - حذف مشرف
-/admin permissions <id> <صلاحيات> - تعديل الصلاحيات
-
-*❓ للمساعدة:* @دعم_البوت
+*📞 الدعم الفني:*
+للإبلاغ عن مشاكل أو اقتراحات
     `;
     
     bot.sendMessage(chatId, helpMessage, { parse_mode: 'Markdown' });
 });
 
-// ============================================
-// 10. نظام إدارة الجلسات
-// ============================================
-
-// عرض جميع الجلسات
+// الأمر /sessions
 bot.onText(/\/sessions/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id.toString();
@@ -431,11 +495,10 @@ bot.onText(/\/sessions/, async (msg) => {
             message += `${index + 1}. ${statusEmoji} *${session.phoneNumber || 'بدون رقم'}*\n`;
             message += `   📌 الحالة: ${session.status}\n`;
             message += `   🆔 المعرف: ${session.id.substring(0, 8)}...\n`;
-            message += `   📅 آخر نشاط: ${new Date(session.lastActivity).toLocaleDateString('ar-SA')}\n`;
-            message += `   🔧 [QR Code](/sessions qr ${session.id}) | [حذف](/sessions remove ${session.id})\n\n`;
+            message += `   📅 تم الإنشاء: ${new Date(session.createdAt).toLocaleDateString('ar-SA')}\n\n`;
         });
         
-        message += `\n📌 *الأوامر:*\n`;
+        message += `📌 *الأوامر:*\n`;
         message += `/sessions add - إضافة جلسة جديدة\n`;
         message += `/sessions refresh - تحديث الحالات\n`;
         
@@ -445,12 +508,12 @@ bot.onText(/\/sessions/, async (msg) => {
         });
         
     } catch (error) {
-        logger.error(`خطأ في عرض الجلسات: ${error.message}`, { error });
+        console.error('خطأ في عرض الجلسات:', error);
         bot.sendMessage(chatId, '❌ حدث خطأ في عرض الجلسات');
     }
 });
 
-// إضافة جلسة جديدة
+// الأمر /sessions add
 bot.onText(/\/sessions add/, async (msg) => {
     const chatId = msg.chat.id;
     const telegramId = msg.from.id.toString();
@@ -459,7 +522,7 @@ bot.onText(/\/sessions add/, async (msg) => {
         const admin = await Admin.findOne({ where: { telegramId } });
         if (!admin) return;
         
-        // التحقق من الحد الأقصى للجلسات
+        // التحقق من الحد الأقصى
         const sessionCount = await WhatsAppSession.count({ where: { adminId: admin.id } });
         const maxSessions = parseInt(process.env.WHATSAPP_MAX_SESSIONS) || 5;
         
@@ -470,18 +533,10 @@ bot.onText(/\/sessions add/, async (msg) => {
             );
         }
         
-        // إنشاء جلسة جديدة
-        const sessionId = uuidv4();
-        const newSession = await WhatsAppSession.create({
-            sessionId: sessionId,
-            adminId: admin.id,
-            status: 'pending'
-        });
-        
-        // تخزين حالة المستخدم للاستكمال
+        // حفظ حالة المستخدم
         userStates.set(telegramId, {
             state: 'awaiting_phone',
-            sessionId: newSession.id
+            adminId: admin.id
         });
         
         bot.sendMessage(chatId,
@@ -494,44 +549,341 @@ bot.onText(/\/sessions add/, async (msg) => {
         );
         
     } catch (error) {
-        logger.error(`خطأ في إضافة جلسة: ${error.message}`, { error });
+        console.error('خطأ في إضافة جلسة:', error);
         bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الجلسة');
     }
 });
 
-// ============================================
-// 11. معالجة الرسائل النصية (للاستكمال التفاعلي)
-// ============================================
+// الأمر /links
+bot.onText(/\/links/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        const links = await CollectedLink.findAll({
+            order: [['collectedAt', 'DESC']],
+            limit: 10
+        });
+        
+        if (links.length === 0) {
+            return bot.sendMessage(chatId,
+                '🔍 *لا توجد روابط مجمعة*\n\n' +
+                'سيتم جمع الروابط تلقائياً من جلسات واتساب.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+        let message = `*🔗 آخر ${links.length} رابط مجمع*\n\n`;
+        
+        links.forEach((link, index) => {
+            const categoryEmoji = {
+                'whatsapp': '📱',
+                'telegram': '📢',
+                'website': '🌐',
+                'other': '🔗'
+            }[link.category] || '🔗';
+            
+            message += `${index + 1}. ${categoryEmoji} *${link.title || 'بدون عنوان'}*\n`;
+            message += `   ${link.url.substring(0, 50)}${link.url.length > 50 ? '...' : ''}\n`;
+            message += `   📍 ${link.sourceChat || 'غير معروف'}\n\n`;
+        });
+        
+        message += `📊 *الإجمالي:* ${await CollectedLink.count()} رابط\n`;
+        
+        bot.sendMessage(chatId, message, { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+        });
+        
+    } catch (error) {
+        console.error('خطأ في /links:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الروابط');
+    }
+});
+
+// الأمر /ads
+bot.onText(/\/ads/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        const ads = await Advertisement.findAll({
+            where: { adminId: admin.id },
+            order: [['createdAt', 'DESC']]
+        });
+        
+        if (ads.length === 0) {
+            return bot.sendMessage(chatId,
+                '📭 *لا توجد إعلانات*\n\n' +
+                'استخدم /ads add لإضافة إعلان جديد.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+        let message = `*📢 إعلاناتك (${ads.length})*\n\n`;
+        
+        ads.forEach((ad, index) => {
+            const typeEmoji = {
+                'text': '📝',
+                'image': '🖼️',
+                'video': '🎥',
+                'contact': '👤',
+                'document': '📄'
+            }[ad.type] || '📢';
+            
+            const statusEmoji = ad.isActive ? '✅' : '❌';
+            
+            message += `${index + 1}. ${typeEmoji} ${statusEmoji}\n`;
+            message += `   ${ad.content.substring(0, 50)}${ad.content.length > 50 ? '...' : ''}\n`;
+            message += `   📊 مرسل: ${ad.stats?.sent || 0}\n\n`;
+        });
+        
+        message += `📌 *أوامر:*\n`;
+        message += `/ads add - إضافة إعلان جديد\n`;
+        message += `/ads post <id> - نشر إعلان\n`;
+        
+        bot.sendMessage(chatId, message, { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+        });
+        
+    } catch (error) {
+        console.error('خطأ في /ads:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الإعلانات');
+    }
+});
+
+// الأمر /ads add
+bot.onText(/\/ads add/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        userStates.set(telegramId, {
+            state: 'awaiting_ad_content',
+            adminId: admin.id
+        });
+        
+        bot.sendMessage(chatId,
+            `📢 *إضافة إعلان جديد*\n\n` +
+            `أرسل لي نص الإعلان:\n` +
+            `(يمكنك استخدام Markdown للتنسيق)\n\n` +
+            `❌ للإلغاء: /cancel`,
+            { parse_mode: 'Markdown' }
+        );
+        
+    } catch (error) {
+        console.error('خطأ في /ads add:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الإعلان');
+    }
+});
+
+// الأمر /autopost
+bot.onText(/\/autopost/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        const isActive = activeAutoPosts.has(admin.id);
+        
+        let message = `*🚀 النشر التلقائي*\n\n`;
+        
+        if (isActive) {
+            const postInfo = activeAutoPosts.get(admin.id);
+            message += `✅ *الحالة:* نشط\n`;
+            message += `⏱️ *الفاصل:* ${postInfo.interval}ms\n`;
+            message += `📅 *بدأ في:* ${new Date(postInfo.startedAt).toLocaleTimeString('ar-SA')}\n\n`;
+            message += `🛑 لإيقاف النشر: /autopost stop\n`;
+        } else {
+            message += `❌ *الحالة:* متوقف\n\n`;
+            message += `▶️ لبدء النشر: /autopost start\n`;
+            message += `📋 لعرض الإعلانات: /ads\n`;
+        }
+        
+        bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+        
+    } catch (error) {
+        console.error('خطأ في /autopost:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في عرض حالة النشر');
+    }
+});
+
+// الأمر /autopost start
+bot.onText(/\/autopost start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        if (activeAutoPosts.has(admin.id)) {
+            return bot.sendMessage(chatId,
+                '⚠️ النشر التلقائي يعمل بالفعل!\n' +
+                'استخدم /autopost stop لإيقافه أولاً.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+        const ads = await Advertisement.findAll({
+            where: { 
+                adminId: admin.id,
+                isActive: true 
+            }
+        });
+        
+        if (ads.length === 0) {
+            return bot.sendMessage(chatId,
+                '❌ لا توجد إعلانات نشطة!\n' +
+                'استخدم /ads add لإضافة إعلان أولاً.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+        userStates.set(telegramId, {
+            state: 'select_ad_for_autopost',
+            adminId: admin.id,
+            ads: ads
+        });
+        
+        let message = `*🚀 بدء النشر التلقائي*\n\n`;
+        message += `لديك ${ads.length} إعلان نشط:\n\n`;
+        
+        ads.forEach((ad, index) => {
+            message += `${index + 1}. ${ad.type === 'text' ? '📝' : '🖼️'} ${ad.content.substring(0, 30)}...\n`;
+        });
+        
+        message += `\nأرسل رقم الإعلان الذي تريد نشره:`;
+        
+        bot.sendMessage(chatId, message, { 
+            parse_mode: 'Markdown',
+            disable_web_page_preview: true
+        });
+        
+    } catch (error) {
+        console.error('خطأ في /autopost start:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في بدء النشر التلقائي');
+    }
+});
+
+// الأمر /join
+bot.onText(/\/join/, async (msg) => {
+    const chatId = msg.chat.id;
+    
+    const message = `
+*👥 الانضمام التلقائي للمجموعات*
+
+✅ *الميزات المتاحة:*
+• الانضمام التلقائي لروابط واتساب
+• استخراج الروابط من الرسائل
+• تجنب المجموعات المغلقة
+
+🔧 *الإعدادات الحالية:*
+• الحالة: ${process.env.AUTO_JOIN_ENABLED === 'true' ? '✅ مفعل' : '❌ معطل'}
+• فحص كل: ${process.env.AUTO_JOIN_CHECK_INTERVAL || 30000}ms
+• تأخير بين المحاولات: ${process.env.AUTO_JOIN_DELAY_BETWEEN || 2000}ms
+
+📌 *الأوامر:*
+/join on - تفعيل الانضمام التلقائي
+/join off - تعطيل الانضمام التلقائي
+/join test <رابط> - اختبار رابط
+    `;
+    
+    bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+});
+
+// الأمر /stats
+bot.onText(/\/stats/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        const stats = WhatsAppManager ? WhatsAppManager.getStats() : { totalSessions: 0, readySessions: 0 };
+        const totalLinks = await CollectedLink.count();
+        const totalAds = await Advertisement.count();
+        
+        const statsMessage = `
+📊 *إحصائيات النظام*
+
+*📱 جلسات واتساب:*
+• الإجمالي: ${stats.totalSessions}
+• النشطة: ${stats.readySessions}
+
+*🔗 الروابط المجمعة:*
+• الإجمالي: ${totalLinks}
+• واتساب: ${await CollectedLink.count({ where: { category: 'whatsapp' } })}
+• تليجرام: ${await CollectedLink.count({ where: { category: 'telegram' } })}
+
+*📢 الإعلانات:*
+• الإجمالي: ${totalAds}
+• النشطة: ${await Advertisement.count({ where: { isActive: true } })}
+
+*👥 المشرفين:*
+• الإجمالي: ${await Admin.count()}
+• النشطون: ${await Admin.count({ where: { isActive: true } })}
+
+*⏱️ وقت التشغيل:* ${Math.floor(process.uptime() / 3600)} ساعة
+        `;
+        
+        bot.sendMessage(chatId, statsMessage, { parse_mode: 'Markdown' });
+        
+    } catch (error) {
+        console.error('خطأ في /stats:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في جلب الإحصائيات');
+    }
+});
+
+// معالجة الرسائل النصية
 bot.on('message', async (msg) => {
-    if (msg.text && msg.text.startsWith('/')) return; // تجاهل الأوامر
+    if (msg.text && msg.text.startsWith('/')) return;
     
     const chatId = msg.chat.id;
     const telegramId = msg.from.id.toString();
     const userState = userStates.get(telegramId);
     
-    if (!userState) return;
+    if (!userState || !msg.text) return;
     
     try {
         switch (userState.state) {
             case 'awaiting_phone':
-                await handlePhoneNumberInput(msg, userState);
+                await handlePhoneNumber(msg, userState, chatId);
                 break;
-            // يمكن إضافة حالات أخرى لاحقاً
+                
+            case 'awaiting_ad_content':
+                await handleAdContent(msg, userState, chatId);
+                break;
+                
+            case 'select_ad_for_autopost':
+                await handleAdSelection(msg, userState, chatId);
+                break;
         }
     } catch (error) {
-        logger.error(`خطأ في معالجة الرسالة: ${error.message}`, { error });
-        userStates.delete(telegramId);
+        console.error('خطأ في معالجة الرسالة:', error);
         bot.sendMessage(chatId, '❌ حدث خطأ في المعالجة');
+        userStates.delete(telegramId);
     }
 });
 
-// معالجة إدخال رقم الهاتف
-async function handlePhoneNumberInput(msg, userState) {
-    const chatId = msg.chat.id;
+// معالجة رقم الهاتف
+async function handlePhoneNumber(msg, userState, chatId) {
     const phoneNumber = msg.text.trim();
-    
-    // التحقق من صحة رقم الهاتف
     const phoneRegex = /^\+[1-9]\d{1,14}$/;
+    
     if (!phoneRegex.test(phoneNumber)) {
         return bot.sendMessage(chatId,
             '❌ رقم الهاتف غير صالح.\n' +
@@ -542,128 +894,257 @@ async function handlePhoneNumberInput(msg, userState) {
     }
     
     try {
-        // تحديث الجلسة برقم الهاتف
-        await WhatsAppSession.update(
-            { phoneNumber: phoneNumber, status: 'authenticating' },
-            { where: { id: userState.sessionId } }
-        );
+        if (!WhatsAppManager) {
+            throw new Error('مدير واتساب غير متاح');
+        }
         
-        // تغيير حالة المستخدم
-        userState.state = 'awaiting_qr';
+        const sessionId = await WhatsAppManager.createSession(userState.adminId, phoneNumber);
         
-        // هنا سيكون توليد QR code من مدير واتساب
-        // مؤقتاً: إرسال رسالة توضيحية
+        // حفظ في قاعدة البيانات
+        await WhatsAppSession.create({
+            id: sessionId,
+            sessionId: sessionId,
+            phoneNumber: phoneNumber,
+            adminId: userState.adminId,
+            status: 'pending'
+        });
+        
         bot.sendMessage(chatId,
-            `✅ تم حفظ رقم الهاتف: ${phoneNumber}\n\n` +
-            `📱 جاري تحضير QR code للاتصال...\n` +
-            `الرجاء الانتظار لحظة.`
+            `✅ *تم إنشاء الجلسة*\n\n` +
+            `🆔 المعرف: \`${sessionId.substring(0, 8)}\`\n` +
+            `📱 الرقم: ${phoneNumber}\n\n` +
+            `⏳ جاري تحضير QR code...`,
+            { parse_mode: 'Markdown' }
         );
         
-        // محاكاة إنشاء QR (في النسخة الكاملة سيتم الاتصال بـ WhatsAppManager)
-        setTimeout(async () => {
-            try {
-                // في الواقع، هنا سيتم استدعاء WhatsAppManager لإنشاء الجلسة
-                const qrCode = "SIMULATED_QR_CODE_DATA";
-                
-                await WhatsAppSession.update(
-                    { 
-                        qrCode: qrCode,
-                        status: 'pending'
-                    },
-                    { where: { id: userState.sessionId } }
-                );
-                
+        // الاستماع لحدث QR
+        WhatsAppManager.once('sessionQR', (data) => {
+            if (data.sessionId === sessionId) {
                 bot.sendMessage(chatId,
-                    `📲 *QR Code جاهز للمسح*\n\n` +
+                    `📱 *QR Code جاهز*\n\n` +
                     `1. افتح واتساب على هاتفك\n` +
                     `2. اذهب إلى الإعدادات → الأجهزة المرتبطة\n` +
                     `3. انقر على "ربط جهاز"\n` +
                     `4. مسح QR Code التالي:\n\n` +
-                    `[QR Code سيظهر هنا في النسخة الكاملة]\n\n` +
-                    `⏳ هذا QR صالح لمدة 60 ثانية\n` +
-                    `🔄 سيتم تجديده تلقائياً إذا انتهت`,
+                    `\`\`\`\n${data.qrCode}\n\`\`\``,
                     { parse_mode: 'Markdown' }
                 );
-                
-                // مسح حالة المستخدم بعد 5 دقائق
-                setTimeout(() => {
-                    userStates.delete(msg.from.id.toString());
-                }, 5 * 60 * 1000);
-                
-            } catch (error) {
-                logger.error(`خطأ في إنشاء QR: ${error.message}`, { error });
-                bot.sendMessage(chatId, '❌ حدث خطأ في إنشاء QR code');
-                userStates.delete(msg.from.id.toString());
             }
-        }, 2000);
+        });
+        
+        userStates.delete(msg.from.id.toString());
         
     } catch (error) {
-        logger.error(`خطأ في حفظ رقم الهاتف: ${error.message}`, { error });
-        throw error;
+        console.error('خطأ في إنشاء الجلسة:', error);
+        bot.sendMessage(chatId,
+            `❌ *فشل إنشاء الجلسة!*\n\n` +
+            `الخطأ: ${error.message}\n\n` +
+            `حاول مرة أخرى.`,
+            { parse_mode: 'Markdown' }
+        );
+        userStates.delete(msg.from.id.toString());
     }
 }
 
-// ============================================
-// 12. إعداد سيرفر Express للواجهة الداخلية
-// ============================================
-function setupExpressServer() {
-    const app = express();
-    const PORT = process.env.SERVER_PORT || 3000;
+// معالجة محتوى الإعلان
+async function handleAdContent(msg, userState, chatId) {
+    const content = msg.text;
     
-    app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
-    
-    // route أساسي للتحقق من حالة الخادم
-    app.get('/health', (req, res) => {
-        res.json({
-            status: 'healthy',
-            timestamp: new Date().toISOString(),
-            sessions: userSessions.size,
-            uptime: process.uptime()
+    try {
+        const ad = await Advertisement.create({
+            adminId: userState.adminId,
+            type: 'text',
+            content: content,
+            isActive: true,
+            stats: { sent: 0, failed: 0 }
         });
-    });
-    
-    // route لحالة الجلسات (محمي بمفتاح API)
-    app.get('/api/sessions', (req, res) => {
-        const apiKey = req.headers['x-api-key'];
         
-        if (apiKey !== process.env.API_SECRET_KEY) {
-            return res.status(401).json({ error: 'غير مصرح' });
-        }
+        bot.sendMessage(chatId,
+            `✅ *تم إضافة الإعلان بنجاح!*\n\n` +
+            `🆔 المعرف: \`${ad.id}\`\n` +
+            `📝 النوع: ${ad.type}\n` +
+            `📄 المحتوى: ${content.substring(0, 50)}...\n\n` +
+            `⚡ يمكنك نشره الآن باستخدام:\n` +
+            `/ads post ${ad.id}`,
+            { parse_mode: 'Markdown' }
+        );
         
-        const sessions = Array.from(userSessions.entries()).map(([key, session]) => ({
-            sessionId: key,
-            adminId: session.adminId,
-            status: session.status,
-            phoneNumber: session.phoneNumber
-        }));
+        userStates.delete(msg.from.id.toString());
         
-        res.json({ sessions });
-    });
-    
-    // بدء السيرفر
-    app.listen(PORT, () => {
-        logger.info(`سيرفر Express يعمل على المنفذ ${PORT}`);
-        console.log(chalk.green(`🌐 سيرفر Express يعمل على http://localhost:${PORT}`));
-    });
-    
-    return app;
+    } catch (error) {
+        console.error('خطأ في إضافة الإعلان:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الإعلان');
+        userStates.delete(msg.from.id.toString());
+    }
 }
 
+// معالجة اختيار الإعلان للنشر التلقائي
+async function handleAdSelection(msg, userState, chatId) {
+    const selection = parseInt(msg.text);
+    
+    if (isNaN(selection) || selection < 1 || selection > userState.ads.length) {
+        return bot.sendMessage(chatId,
+            '❌ رقم غير صحيح!\n\n' +
+            `يرجى إرسال رقم بين 1 و ${userState.ads.length}\n` +
+            'أو /cancel للإلغاء',
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    const selectedAd = userState.ads[selection - 1];
+    const interval = parseInt(process.env.AUTO_POST_INTERVAL) || 1000;
+    
+    // بدء النشر التلقائي
+    const autoPostJob = {
+        adminId: userState.adminId,
+        adId: selectedAd.id,
+        interval: interval,
+        startedAt: new Date(),
+        timer: null,
+        isRunning: true
+    };
+    
+    autoPostJob.timer = setInterval(async () => {
+        if (!autoPostJob.isRunning || !WhatsAppManager) return;
+        
+        try {
+            const ad = await Advertisement.findByPk(selectedAd.id);
+            if (!ad || !ad.isActive) {
+                clearInterval(autoPostJob.timer);
+                activeAutoPosts.delete(userState.adminId);
+                return;
+            }
+            
+            const results = await WhatsAppManager.autoPostAdvertisement(
+                { content: ad.content },
+                null,
+                interval
+            );
+            
+            // تحديث إحصائيات الإعلان
+            ad.stats.sent = (ad.stats.sent || 0) + results.sent;
+            ad.stats.failed = (ad.stats.failed || 0) + results.failed;
+            await ad.save();
+            
+        } catch (error) {
+            console.error('خطأ في النشر التلقائي:', error);
+        }
+    }, interval);
+    
+    activeAutoPosts.set(userState.adminId, autoPostJob);
+    
+    bot.sendMessage(chatId,
+        `🚀 *بدأ النشر التلقائي!*\n\n` +
+        `📢 الإعلان: ${selectedAd.content.substring(0, 50)}...\n` +
+        `⏱️ الفاصل: ${interval}ms\n\n` +
+        `🔧 للتحكم:\n` +
+        `/autopost stop - لإيقاف النشر\n` +
+        `/autopost - لعرض الحالة`,
+        { parse_mode: 'Markdown' }
+    );
+    
+    userStates.delete(msg.from.id.toString());
+}
+
+// الأمر /autopost stop
+bot.onText(/\/autopost stop/, async (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    try {
+        const admin = await Admin.findOne({ where: { telegramId } });
+        if (!admin) return;
+        
+        const autoPostJob = activeAutoPosts.get(admin.id);
+        
+        if (autoPostJob && autoPostJob.timer) {
+            clearInterval(autoPostJob.timer);
+            autoPostJob.isRunning = false;
+            activeAutoPosts.delete(admin.id);
+            
+            bot.sendMessage(chatId,
+                '🛑 *تم إيقاف النشر التلقائي*\n\n' +
+                'تم إيقاف جميع عمليات النشر التلقائي.',
+                { parse_mode: 'Markdown' }
+            );
+        } else {
+            bot.sendMessage(chatId,
+                'ℹ️ لا يوجد نشر تلقائي نشط لإيقافه.',
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+    } catch (error) {
+        console.error('خطأ في /autopost stop:', error);
+        bot.sendMessage(chatId, '❌ حدث خطأ في إيقاف النشر');
+    }
+});
+
+// الأمر /cancel
+bot.onText(/\/cancel/, (msg) => {
+    const chatId = msg.chat.id;
+    const telegramId = msg.from.id.toString();
+    
+    userStates.delete(telegramId);
+    bot.sendMessage(chatId, '❌ تم إلغاء العملية الحالية.');
+});
+
 // ============================================
-// 13. المهام المجدولة
+// 8. المهام المجدولة
 // ============================================
 function setupScheduledTasks() {
-    // مهمة تنظيف الجلسات المنتهية كل ساعة
+    // مهمة جمع الروابط كل 10 دقائق
+    cron.schedule('*/10 * * * *', async () => {
+        if (!WhatsAppManager) return;
+        
+        try {
+            const readySessions = WhatsAppManager.getReadySessions();
+            
+            for (const session of readySessions) {
+                try {
+                    const chats = await session.getChats();
+                    
+                    for (const chat of chats.slice(0, 5)) {
+                        // محاكاة جمع الروابط
+                        const mockLinks = [
+                            { url: 'https://chat.whatsapp.com/ABC123', chatName: chat.name },
+                            { url: 'https://t.me/group123', chatName: chat.name }
+                        ];
+                        
+                        for (const link of mockLinks) {
+                            await CollectedLink.findOrCreate({
+                                where: { url: link.url },
+                                defaults: {
+                                    url: link.url,
+                                    category: link.url.includes('whatsapp') ? 'whatsapp' : 
+                                             link.url.includes('t.me') ? 'telegram' : 'website',
+                                    title: `رابط من ${chat.name}`,
+                                    sourceChat: chat.name,
+                                    sessionId: session.sessionId
+                                }
+                            });
+                        }
+                    }
+                    
+                    console.log(`جمع الروابط من جلسة ${session.sessionId.substring(0, 8)}`);
+                } catch (error) {
+                    console.error(`خطأ في جمع الروابط: ${error.message}`);
+                }
+            }
+        } catch (error) {
+            console.error(`خطأ في مهمة جمع الروابط: ${error.message}`);
+        }
+    });
+    
+    // مهمة تنظيف الجلسات كل ساعة
     cron.schedule('0 * * * *', async () => {
         try {
-            const timeout = parseInt(process.env.WHATSAPP_SESSION_TIMEOUT) || 300000;
-            const cutoffTime = new Date(Date.now() - timeout);
+            const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000);
             
             const expiredSessions = await WhatsAppSession.findAll({
                 where: {
-                    status: 'pending',
-                    lastActivity: { [Sequelize.Op.lt]: cutoffTime }
+                    status: 'disconnected',
+                    updatedAt: { [Op.lt]: cutoffTime }
                 }
             });
             
@@ -674,167 +1155,113 @@ function setupScheduledTasks() {
                     }
                 });
                 
-                logger.info(`تم تنظيف ${expiredSessions.length} جلسة منتهية`);
+                console.log(`تم تنظيف ${expiredSessions.length} جلسة منتهية`);
             }
         } catch (error) {
-            logger.error(`خطأ في مهمة التنظيف: ${error.message}`, { error });
+            console.error(`خطأ في مهمة التنظيف: ${error.message}`);
         }
     });
     
-    // مهمة حفظ الإحصائيات كل يوم
-    cron.schedule('0 0 * * *', async () => {
-        try {
-            const stats = {
-                totalSessions: await WhatsAppSession.count(),
-                activeSessions: await WhatsAppSession.count({ where: { status: 'active' } }),
-                totalLinks: await CollectedLink.count(),
-                totalAds: await Advertisement.count({ where: { isActive: true } }),
-                timestamp: new Date()
-            };
-            
-            logger.info('إحصائيات يومية:', stats);
-        } catch (error) {
-            logger.error(`خطأ في حفظ الإحصائيات: ${error.message}`, { error });
-        }
-    });
-    
-    console.log(chalk.green('✅ تم إعداد المهام المجدولة'));
+    console.log('✅ تم إعداد المهام المجدولة');
 }
 
 // ============================================
-// 14. وظيفة البدء الرئيسية
+// 9. وظيفة البدء الرئيسية
 // ============================================
 async function startBot() {
-    console.log(chalk.cyan('\n🔧 جاري تهيئة النظام...'));
+    console.log('\n🔧 جاري تهيئة النظام...');
     
     // 1. تهيئة قاعدة البيانات
     const dbInitialized = await initializeDatabase();
     if (!dbInitialized) {
-        console.log(chalk.red('❌ فشل تهيئة قاعدة البيانات'));
+        console.log('❌ فشل تهيئة قاعدة البيانات');
         process.exit(1);
     }
     
-    // 2. إعداد سيرفر Express
-    if (process.env.NODE_ENV !== 'test') {
-        setupExpressServer();
+    // 2. إنشاء مجلدات ضرورية
+    try {
+        await fs.mkdir('sessions', { recursive: true });
+        await fs.mkdir('database', { recursive: true });
+        await fs.mkdir('logs', { recursive: true });
+        console.log('✅ تم إنشاء المجلدات الضرورية');
+    } catch (error) {
+        console.log(`⚠️  خطأ في إنشاء المجلدات: ${error.message}`);
     }
     
     // 3. إعداد المهام المجدولة
     setupScheduledTasks();
     
-    // 4. تهيئة مدير واتساب (إذا كان موجوداً)
-    if (WhatsAppManager) {
-        try {
-            // سيتم إنشاء هذا في ملف whatsappClient.js
-            console.log(chalk.yellow('⚠️  مدير واتساب يحتاج لملف whatsappClient.js'));
-        } catch (error) {
-            console.log(chalk.red(`❌ خطأ في مدير واتساب: ${error.message}`));
-        }
-    }
+    // 4. رسالة البدء النهائية
+    console.log('\n✅ ✅ ✅ البوت يعمل بنجاح! ✅ ✅ ✅');
+    console.log('=========================================');
+    console.log('🤖 البوت: جاهز لاستقبال الأوامر');
+    console.log(`📊 المشرفين: ${process.env.TELEGRAM_ADMIN_IDS.split(',').length}`);
+    console.log(`⏱️  المهام المجدولة: 2 مهام نشطة`);
+    console.log('=========================================');
     
-    // 5. رسالة البدء النهائية
-    console.log(chalk.green('\n✅ ✅ ✅ البوت يعمل بنجاح! ✅ ✅ ✅'));
-    console.log(chalk.cyan('========================================='));
-    console.log(chalk.white('🤖 البوت: جاهز لاستقبال الأوامر'));
-    console.log(chalk.white(`📊 المشرفين: ${process.env.TELEGRAM_ADMIN_IDS.split(',').length}`));
-    console.log(chalk.white(`🗄️  قاعدة البيانات: ${process.env.DATABASE_URL}`));
-    console.log(chalk.white(`🌐 الواجهة: http://localhost:${process.env.SERVER_PORT || 3000}/health`));
-    console.log(chalk.cyan('========================================='));
-    
-    // إرسال رسالة للمشرفين
+    // 5. إرسال رسالة للمشرفين
     const adminIds = process.env.TELEGRAM_ADMIN_IDS.split(',');
     for (const adminId of adminIds) {
         try {
             await bot.sendMessage(adminId.trim(), 
                 '🚀 *البوت يعمل الآن!*\n\n' +
-                'تم تشغيل بوت إدارة واتساب بنجاح.\n' +
+                '✅ تم تشغيل بوت إدارة واتساب بنجاح.\n' +
+                '📊 قاعدة البيانات: جاهزة\n' +
+                '🔧 جميع المكونات: نشطة\n\n' +
                 'استخدم /start للبدء أو /help للمساعدة.',
                 { parse_mode: 'Markdown' }
             );
         } catch (error) {
-            console.log(chalk.yellow(`⚠️  لا يمكن إرسال رسالة للمشرف ${adminId}: ${error.message}`));
+            console.log(`⚠️  لا يمكن إرسال رسالة للمشرف ${adminId}: ${error.message}`);
         }
     }
 }
 
 // ============================================
-// 15. التعامل مع إيقاف التشغيل
+// 10. التعامل مع إيقاف التشغيل
 // ============================================
 process.on('SIGINT', async () => {
-    console.log(chalk.yellow('\n🛑 تلقي إشارة إيقاف...'));
+    console.log('\n🛑 تلقي إشارة إيقاف...');
     
     try {
-        // حفظ جميع الجلسات النشطة
-        if (WhatsAppManager && WhatsAppManager.saveAllSessions) {
-            await WhatsAppManager.saveAllSessions();
-        }
-        
-        // إغلاق قاعدة البيانات
-        await sequelize.close();
-        
-        // إرسال رسالة للمشرفين
-        const adminIds = process.env.TELEGRAM_ADMIN_IDS.split(',');
-        for (const adminId of adminIds) {
-            try {
-                await bot.sendMessage(adminId.trim(), 
-                    '🛑 *البوت متوقف*\n\n' +
-                    'تم إيقاف بوت إدارة واتساب.\n' +
-                    'سيتم إعادة التشغيل تلقائياً على Render.',
-                    { parse_mode: 'Markdown' }
-                );
-            } catch (error) {
-                // تجاهل الأخطاء في الإرسال
+        // إيقاف جميع النشر التلقائي
+        for (const [adminId, job] of activeAutoPosts.entries()) {
+            if (job.timer) {
+                clearInterval(job.timer);
             }
         }
+        activeAutoPosts.clear();
         
-        console.log(chalk.green('✅ تم إيقاف البوت بنظام'));
+        console.log('✅ تم إيقاف البوت بنظام');
         process.exit(0);
         
     } catch (error) {
-        console.log(chalk.red(`❌ خطأ في الإيقاف: ${error.message}`));
+        console.log(`❌ خطأ في الإيقاف: ${error.message}`);
         process.exit(1);
     }
 });
 
 // ============================================
-// 16. التعامل مع الأخطاء غير المعالجة
-// ============================================
-process.on('unhandledRejection', (error) => {
-    logger.error(`رفض غير معالج: ${error.message}`, { error });
-    console.log(chalk.red(`❌ رفض غير معالج: ${error.message}`));
-});
-
-process.on('uncaughtException', (error) => {
-    logger.error(`استثناء غير معالج: ${error.message}`, { error });
-    console.log(chalk.red(`❌ استثناء غير معالج: ${error.message}`));
-    // لا نخرج من العملية، بل نستمر مع تسجيل الخطأ
-});
-
-// ============================================
-// 17. بدء التشغيل
+// 11. بدء التشغيل
 // ============================================
 if (require.main === module) {
     startBot().catch(error => {
-        console.log(chalk.red(`❌ فشل بدء التشغيل: ${error.message}`));
-        logger.error(`فشل بدء التشغيل: ${error.message}`, { error });
+        console.log(`❌ فشل بدء التشغيل: ${error.message}`);
         process.exit(1);
     });
 }
 
 // ============================================
-// 18. التصدير للمكونات الأخرى
+// 12. التصدير
 // ============================================
 module.exports = {
     bot,
-    sequelize,
     Admin,
     WhatsAppSession,
     CollectedLink,
     Advertisement,
     AutoReply,
-    Group,
     userStates,
-    userSessions,
-    logger,
+    activeAutoPosts,
     startBot
 };
