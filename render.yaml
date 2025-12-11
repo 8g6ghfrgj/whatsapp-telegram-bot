@@ -1,0 +1,503 @@
+# ============================================
+# ملف Blueprint لتكوين Render.com
+# WhatsApp-Telegram Bot - خطة مدفوعة
+# ============================================
+
+# معلومات المشروع
+name: whatsapp-telegram-bot
+region: frankfurt  # أو أي منطقة قريبة منك
+branch: main
+buildFilter:
+  paths:
+    - "**"
+
+# ============================================
+# 1. قاعدة البيانات PostgreSQL (مطلوبة)
+# ============================================
+databases:
+  - name: whatsapp-bot-db
+    databaseName: whatsapp_bot
+    user: whatsapp_bot_user
+    region: frankfurt
+    plan: starter  # يبدأ من $7/شهر، أو free للمجاني
+    ipAllowList: []  # السماح من جميع المصادر
+    
+    # إعدادات PostgreSQL المتقدمة
+    postgresMajorVersion: "15"
+    terminationProtection: false
+    
+    # نسخ احتياطية تلقائية
+    automaticBackups: true
+    backupRetention: 7  # أيام
+    
+    # مراقبة
+    monitoring:
+      enabled: true
+      alerts:
+        - type: cpu
+          threshold: 80
+          duration: "5m"
+        - type: memory
+          threshold: 85
+          duration: "5m"
+        - type: disk
+          threshold: 90
+          duration: "10m"
+
+# ============================================
+# 2. خدمة Worker الرئيسية (للـ Bot)
+# ============================================
+services:
+  - type: worker
+    name: whatsapp-bot-worker
+    env: node
+    region: frankfurt
+    plan: standard  # مطلوب للـ Puppeteer، يبدأ من $7/شهر
+    
+    # إعدادات البناء
+    buildCommand: |
+      echo "🚀 بدء بناء مشروع WhatsApp-Telegram Bot..."
+      npm ci --only=production
+      npx playwright install-deps  # تثبيت dependencies النظام
+      npx playwright install chromium --with-deps
+      npm run puppeteer-install
+      echo "✅ البناء اكتمل"
+    
+    # أمر البدء
+    startCommand: npm start
+    
+    # إعدادات البيئة المشتركة
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RENDER
+        value: "true"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: connectionString
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_TO_FILE
+        value: "true"
+      - key: WHATSAPP_SESSION_DIR
+        value: /tmp/sessions
+      - key: WHATSAPP_MAX_SESSIONS
+        value: "5"
+      - key: BROWSER_HEADLESS
+        value: "true"
+      - key: AUTO_POST_INTERVAL
+        value: "1000"
+      - key: AUTO_JOIN_ENABLED
+        value: "true"
+    
+    # إعدادات Puppeteer المهمة
+    envVars:
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium-browser
+      - key: BROWSER_ARGS
+        value: --no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-accelerated-2d-canvas,--disable-gpu,--window-size=1920x1080,--single-process
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "false"
+      - key: PUPPETEER_PRODUCT
+        value: chromium
+    
+    # متغيرات حساسة (يتم إضافتها يدوياً في لوحة Render)
+    # - TELEGRAM_BOT_TOKEN
+    # - TELEGRAM_ADMIN_IDS
+    # - ENCRYPTION_KEY
+    # - API_SECRET_KEY
+    
+    # إعدادات الخادم
+    healthCheckPath: /health
+    dockerCommand: null
+    dockerContext: .
+    dockerfilePath: ./Dockerfile  # إذا كنت تستخدم Docker
+    
+    # إعدادات التوسع
+    scaling:
+      minInstances: 1
+      maxInstances: 2
+      targetMemoryPercent: 80
+      targetCPUPercent: 70
+    
+    # إعدادات الشبكة
+    privateService: false
+    allowedHTTPMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    
+    # إعدادات الأمان
+    security:
+      enableTLS: true
+      forceTLS: true
+      cors:
+        allowedOrigins:
+          - "https://dashboard.render.com"
+        allowedMethods:
+          - GET
+          - POST
+        allowedHeaders:
+          - Content-Type
+          - Authorization
+          - X-API-Key
+    
+    # توجيهات النشر
+    deploy:
+      autoDeploy: true
+      previewEnabled: true
+      previewDeploymentHooks:
+        buildCommand: npm run build
+        startCommand: npm start
+      rollbackOnFailure: true
+      concurrency: 1
+    
+    # المراقبة والتنبيهات
+    monitoring:
+      enabled: true
+      alerts:
+        - type: instance_count
+          condition: "<"
+          value: 1
+          duration: "5m"
+        - type: response_time
+          condition: ">"
+          value: 5000  # 5 ثواني
+          duration: "10m"
+        - type: error_rate
+          condition: ">"
+          value: 5  # 5%
+          duration: "15m"
+    
+    # موارد النظام
+    resources:
+      cpu: 1  # نواة
+      memory: 2048  # 2GB مطلوب للـ Puppeteer
+      disk: 10240  # 10GB
+    
+    # أوقات التشغيل
+    schedules:
+      - name: daily-backup
+        schedule: "0 2 * * *"  # 2 صباحاً كل يوم
+        command: "node scripts/backup.js"
+      - name: cleanup-sessions
+        schedule: "0 4 * * *"  # 4 صباحاً كل يوم
+        command: "node scripts/cleanup.js"
+
+# ============================================
+# 3. خدمة ويب للواجهة الإدارية (اختياري)
+# ============================================
+  - type: web
+    name: whatsapp-bot-dashboard
+    env: node
+    region: frankfurt
+    plan: starter
+    
+    # إعدادات البناء
+    buildCommand: |
+      echo "🌐 بناء لوحة التحكم..."
+      npm ci --only=production
+      echo "✅ بناء لوحة التحكم اكتمل"
+    
+    # أمر البدء
+    startCommand: node dashboard/server.js
+    
+    # البيئة
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: API_SECRET_KEY
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+    
+    # المسارات
+    rootDir: ./dashboard
+    healthCheckPath: /status
+    autoDeploy: true
+    
+    # الموارد
+    resources:
+      cpu: 0.5
+      memory: 512
+      disk: 512
+
+# ============================================
+# 4. خدمة Cron للمهام المجدولة
+# ============================================
+  - type: cron
+    name: bot-maintenance
+    env: node
+    region: frankfurt
+    plan: starter
+    
+    # الجدولة
+    schedule: "*/30 * * * *"  # كل 30 دقيقة
+    
+    # الأمر
+    command: node scripts/maintenance.js
+    
+    # البيئة
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: connectionString
+    
+    # إعدادات التنفيذ
+    timeout: 600  # 10 دقائق
+    maxRetries: 3
+    retryDelay: 60  # 60 ثانية
+
+# ============================================
+# 5. تخزين Redis للذاكرة المؤقتة (اختياري)
+# ============================================
+redis:
+  - name: whatsapp-bot-cache
+    region: frankfurt
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
+    
+    # المراقبة
+    monitoring:
+      enabled: true
+      alerts:
+        - type: memory
+          threshold: 80
+          duration: "5m"
+    
+    # النسخ الاحتياطي
+    automaticBackups: true
+    backupSchedule: "0 3 * * *"  # 3 صباحاً كل يوم
+
+# ============================================
+# 6. تخزين الملفات (لجلسات واتساب)
+# ============================================
+disk:
+  - name: sessions-storage
+    mountPath: /data/sessions
+    sizeGB: 5
+    
+    # النسخ الاحتياطي
+    backupSchedule: "0 1 * * *"
+    backupRetention: 7
+
+# ============================================
+# 7. إعدادات الشبكة والأمان
+# ============================================
+network:
+  # شبكة خاصة داخلية
+  privateNetwork:
+    enabled: true
+    services:
+      - whatsapp-bot-worker
+      - whatsapp-bot-dashboard
+      - whatsapp-bot-db
+  
+  # قواعد جدار الحماية
+  firewall:
+    - name: allow-telegram-webhooks
+      port: 443
+      source: "0.0.0.0/0"
+      protocol: tcp
+    - name: allow-dashboard
+      port: 10000
+      source: "0.0.0.0/0"
+      protocol: tcp
+  
+  # موازن الحمل
+  loadBalancer:
+    enabled: true
+    ssl:
+      enabled: true
+      provider: letsencrypt
+      domains:
+        - your-domain.com
+    stickySessions: true
+
+# ============================================
+# 8. إعدادات المراقبة والتنبيهات
+# ============================================
+observability:
+  # تسجيل الأحداث
+  logging:
+    enabled: true
+    retentionDays: 30
+    includeFields:
+      - timestamp
+      - level
+      - message
+      - sessionId
+      - adminId
+    
+    # تصدير اللوجات
+    exports:
+      - type: s3
+        bucket: your-log-bucket
+        schedule: "0 0 * * *"  # يومياً
+  
+  # المقاييس
+  metrics:
+    enabled: true
+    collectionInterval: 60  # ثانية
+    
+    # مقاييس مخصصة
+    customMetrics:
+      - name: whatsapp_sessions_active
+        query: "SELECT COUNT(*) FROM whatsapp_sessions WHERE status = 'active'"
+        interval: 300
+      - name: messages_sent_daily
+        query: "SELECT SUM(messages_sent) FROM session_stats WHERE date = CURRENT_DATE"
+        interval: 3600
+  
+  # التنبيهات
+  alerts:
+    channels:
+      - type: email
+        address: your-email@example.com
+      - type: slack
+        webhook: ${SLACK_WEBHOOK_URL}
+      - type: telegram
+        chatId: ${TELEGRAM_ALERT_CHAT_ID}
+        botToken: ${TELEGRAM_BOT_TOKEN}
+    
+    # قواعد التنبيه
+    rules:
+      - name: high-cpu-usage
+        condition: "cpu.usage > 80"
+        duration: "5m"
+        channels: [email, telegram]
+        
+      - name: session-errors
+        condition: "errors.count > 10"
+        duration: "10m"
+        channels: [slack, telegram]
+        
+      - name: no-active-sessions
+        condition: "whatsapp_sessions_active == 0"
+        duration: "30m"
+        channels: [telegram]
+
+# ============================================
+# 9. استراتيجية النشر
+# ============================================
+deployment:
+  strategy: rolling
+  healthCheck:
+    path: /health
+    interval: 30
+    timeout: 10
+    retries: 3
+    startPeriod: 60
+  
+  # النشر التدريجي
+  canary:
+    enabled: false
+    percentage: 10
+    duration: 15m
+  
+  # إعادة التشغيل التلقائي
+  autoRestart:
+    enabled: true
+    maxRestarts: 3
+    window: 3600  # ساعة
+  
+  # التحديثات
+  updateWindow:
+    start: "02:00"
+    end: "04:00"
+    timezone: "Asia/Riyadh"
+
+# ============================================
+# 10. علامات ووسوم
+# ============================================
+tags:
+  project: whatsapp-telegram-bot
+  environment: production
+  component: automation
+  owner: ${OWNER_EMAIL}
+  cost-center: marketing
+
+# ============================================
+# 11. مخرجات Blueprint
+# ============================================
+outputs:
+  database:
+    host: ${whatsapp-bot-db.host}
+    port: ${whatsapp-bot-db.port}
+    name: ${whatsapp-bot-db.databaseName}
+    
+  services:
+    worker: https://${whatsapp-bot-worker.onRenderUrl}
+    dashboard: https://${whatsapp-bot-dashboard.onRenderUrl}
+    
+  endpoints:
+    health: https://${whatsapp-bot-worker.onRenderUrl}/health
+    api: https://${whatsapp-bot-worker.onRenderUrl}/api
+    
+  monitoring:
+    logs: https://dashboard.render.com/logs/${whatsapp-bot-worker.serviceId}
+    metrics: https://dashboard.render.com/metrics/${whatsapp-bot-worker.serviceId}
+
+# ============================================
+# 12. إعدادات مخصصة للـ WhatsApp
+# ============================================
+whatsapp:
+  # إعدادات الجلسات
+  sessionManagement:
+    autoReconnect: true
+    reconnectDelay: 30000  # 30 ثانية
+    maxReconnectAttempts: 5
+    sessionTimeout: 86400000  # 24 ساعة
+    
+  # إعدادات النشر
+  posting:
+    maxGroupsPerHour: 100
+    delayBetweenGroups: 1000  # 1 ثانية
+    delayBetweenMessages: 2000  # 2 ثانية
+    
+  # إعدادات الانضمام
+  joining:
+    maxJoinsPerHour: 20
+    verifyGroups: true
+    skipPrivateGroups: true
+    
+  # الأمان
+  security:
+    validateLinks: true
+    sanitizeInput: true
+    rateLimiting: true
+    maxRequestsPerMinute: 60
+
+# ============================================
+# 13. البرامج النصية الإضافية
+# ============================================
+scripts:
+  # برنامج النسخ الاحتياطي
+  backup:
+    file: scripts/backup.js
+    schedule: "0 2 * * *"
+    retention: 7
+    
+  # برنامج التنظيف
+  cleanup:
+    file: scripts/cleanup.js
+    schedule: "0 4 * * *"
+    
+  # برنامج الصيانة
+  maintenance:
+    file: scripts/maintenance.js
+    schedule: "*/30 * * * *"
+    
+  # برنامج المراقبة
+  monitor:
+    file: scripts/monitor.js
+    schedule: "*/5 * * * *"
