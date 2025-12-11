@@ -1,6 +1,6 @@
 // ============================================
-// ملف معالجة أوامر تليجرام - WhatsApp-Telegram Bot
-// النسخة المحسنة مع نظام الأزرار التفاعلية
+// ملف Telegram Bot مع نظام الأزرار التفاعلية فقط
+// إصدار كامل - WhatsApp-Telegram Bot
 // ============================================
 
 const TelegramBot = require('node-telegram-bot-api');
@@ -8,16 +8,16 @@ const fs = require('fs').promises;
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const moment = require('moment');
+const crypto = require('crypto');
 require('moment/locale/ar');
 
 moment.locale('ar');
 
-// استيراد المديرين
-const { getWhatsAppManager } = require('./whatsappClient');
-const { Admin, Advertisement, AutoReply, CollectedLink, WhatsAppSession } = require('../database/models');
+// استيراد النماذج
+const { Admin, WhatsAppSession, Advertisement, AutoReply, CollectedLink } = require('../database/models');
 
 class TelegramBotHandler {
-    constructor(token, whatsappManager) {
+    constructor(token, whatsappManager = null) {
         this.bot = new TelegramBot(token, {
             polling: {
                 interval: 1000,
@@ -29,705 +29,195 @@ class TelegramBotHandler {
         });
         
         this.whatsappManager = whatsappManager;
-        this.userStates = new Map(); // لحفظ حالة المستخدمين
+        this.userStates = new Map(); // لحفظ حالات المستخدمين
+        this.sessionQRs = new Map(); // لتخزين QR codes
         this.activeAutoPosts = new Map(); // للنشر التلقائي النشط
-        this.setupHandlers();
+        
+        console.log('🤖 Telegram Bot Handler initialized with button system');
+        this.setupAllHandlers();
     }
     
     // ============================================
-    // 1. إعداد معالجات الأوامر والأزرار
+    // 1. إعداد جميع المعالجات
     // ============================================
-    setupHandlers() {
-        console.log('🤖 جاري إعداد معالجات بوت تليجرام مع الأزرار...');
-        
-        // أوامر الأساسية
-        this.setupBasicCommands();
-        
-        // أوامر الجلسات
-        this.setupSessionCommands();
-        
-        // أوامر الروابط
-        this.setupLinkCommands();
-        
-        // أوامر الإعلانات
-        this.setupAdCommands();
-        
-        // أوامر النشر التلقائي
-        this.setupAutoPostCommands();
-        
-        // أوامر الانضمام التلقائي
-        this.setupJoinCommands();
-        
-        // أوامر الردود التلقائية
-        this.setupAutoReplyCommands();
-        
-        // معالجة الأزرار التفاعلية
+    setupAllHandlers() {
+        this.setupStartHandler();
         this.setupCallbackHandlers();
-        
-        // معالجة الوسائط
-        this.setupMediaHandlers();
-        
-        // معالجة الرسائل النصية
-        this.setupMessageHandler();
+        this.setupMessageHandlers();
+        this.setupCommandBlockers();
     }
     
     // ============================================
-    // 2. الأوامر الأساسية مع أزرار
+    // 2. معالجة /start مع الأزرار الرئيسية
     // ============================================
-    setupBasicCommands() {
-        // /start
+    setupStartHandler() {
         this.bot.onText(/\/start/, async (msg) => {
             const chatId = msg.chat.id;
-            const userId = msg.from.id;
+            const userId = msg.from.id.toString();
             
             try {
-                const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
+                const admin = await Admin.findOne({ where: { telegramId: userId } });
                 
                 if (!admin) {
-                    return this.bot.sendMessage(chatId,
-                        '❌ *غير مصرح لك بالدخول!*\n\n' +
-                        'أنت لست مشرفاً في النظام.\n' +
-                        'يرجى التواصل مع المشرف الرئيسي.',
-                        { parse_mode: 'Markdown' }
-                    );
+                    return this.showNonAdminMenu(chatId, msg.from);
                 }
                 
-                const keyboard = {
-                    inline_keyboard: [
-                        [
-                            { text: '📱 الجلسات', callback_data: 'menu_sessions' },
-                            { text: '🔗 الروابط', callback_data: 'menu_links' }
-                        ],
-                        [
-                            { text: '📢 الإعلانات', callback_data: 'menu_ads' },
-                            { text: '🚀 النشر التلقائي', callback_data: 'menu_autopost' }
-                        ],
-                        [
-                            { text: '👥 الانضمام', callback_data: 'menu_join' },
-                            { text: '🤖 الردود', callback_data: 'menu_autoreply' }
-                        ],
-                        [
-                            { text: '📊 الإحصائيات', callback_data: 'menu_stats' },
-                            { text: '🆘 المساعدة', callback_data: 'menu_help' }
-                        ]
-                    ]
-                };
-                
-                const welcomeMessage = `
-🌟 *مرحباً ${admin.firstName || 'مشرف'}!* 🌟
-
-*🤖 بوت إدارة واتساب عبر تليجرام*
-
-*📋 الأوامر المتاحة عبر الأزرار أدناه:*
-
-• 📱 **الجلسات**: إدارة جلسات واتساب
-• 🔗 **الروابط**: عرض الروابط المجمعة
-• 📢 **الإعلانات**: إدارة الإعلانات
-• 🚀 **النشر التلقائي**: نشر تلقائي في المجموعات
-• 👥 **الانضمام**: الانضمام التلقائي للمجموعات
-• 🤖 **الردود**: الردود التلقائية
-• 📊 **الإحصائيات**: إحصائيات النظام
-• 🆘 **المساعدة**: مركز المساعدة
-
-*💼 حالتك:* ${admin.isActive ? '✅ نشط' : '❌ غير نشط'}
-*🎫 الصلاحيات:* ${admin.permissions.join(', ')}
-                `;
-                
-                this.bot.sendMessage(chatId, welcomeMessage, { 
-                    parse_mode: 'Markdown',
-                    reply_markup: keyboard
-                });
+                await this.showMainMenu(chatId, admin);
                 
             } catch (error) {
-                console.error('خطأ في /start:', error);
+                console.error('Error in /start:', error);
                 this.bot.sendMessage(chatId, '❌ حدث خطأ في المعالجة');
             }
         });
-        
-        // /help - مع أزرار
-        this.bot.onText(/\/help/, (msg) => {
-            const chatId = msg.chat.id;
-            
-            const helpKeyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '📱 الجلسات', callback_data: 'menu_sessions' },
-                        { text: '🔗 الروابط', callback_data: 'menu_links' }
-                    ],
-                    [
-                        { text: '📢 الإعلانات', callback_data: 'menu_ads' },
-                        { text: '🚀 النشر التلقائي', callback_data: 'menu_autopost' }
-                    ],
-                    [
-                        { text: '👥 الانضمام', callback_data: 'menu_join' },
-                        { text: '🤖 الردود', callback_data: 'menu_autoreply' }
-                    ],
-                    [
-                        { text: '📊 الإحصائيات', callback_data: 'menu_stats' },
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            const helpMessage = `
-*🆘 مركز المساعدة*
-
-*🔗 الأوامر الأساسية:*
-/start - بدء استخدام البوت
-/help - عرض هذه الرسالة
-/stats - إحصائيات النظام
-
-*📱 إدارة الجلسات:*
-• عرض جميع الجلسات
-• إضافة جلسة جديدة
-• عرض QR code
-• حذف جلسة
-
-*🔗 جمع الروابط:*
-• عرض جميع الروابط
-• روابط واتساب فقط
-• روابط تليجرام فقط
-• تصدير الروابط
-
-*📢 إدارة الإعلانات:*
-• عرض جميع الإعلانات
-• إضافة إعلان جديد
-• تعديل إعلان
-• حذف إعلان
-
-*🚀 النشر التلقائي:*
-• بدء النشر التلقائي
-• إيقاف النشر التلقائي
-• عرض قائمة النشر
-• ضبط الفترة الزمنية
-
-*👥 الانضمام التلقائي:*
-• تفعيل/تعطيل الانضمام
-• إحصائيات الانضمام
-• اختبار الروابط
-• عرض المجموعات
-
-*🤖 الردود التلقائية:*
-• عرض الردود
-• إضافة رد جديد
-• تعديل رد
-• حذف رد
-
-*📞 الدعم الفني:*
-للإبلاغ عن مشاكل أو اقتراحات
-            `;
-            
-            this.bot.sendMessage(chatId, helpMessage, { 
-                parse_mode: 'Markdown',
-                reply_markup: helpKeyboard
-            });
-        });
-        
-        // /stats - مع أزرار
-        this.bot.onText(/\/stats/, async (msg) => {
-            const chatId = msg.chat.id;
-            const userId = msg.from.id;
-            
-            try {
-                const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-                if (!admin) return;
-                
-                const stats = this.whatsappManager.getStats();
-                const totalLinks = await CollectedLink.count();
-                const totalAds = await Advertisement.count();
-                const totalReplies = await AutoReply.count();
-                
-                const statsKeyboard = {
-                    inline_keyboard: [
-                        [
-                            { text: '🔄 تحديث', callback_data: 'stats_refresh' },
-                            { text: '📊 تفاصيل', callback_data: 'stats_details' }
-                        ],
-                        [
-                            { text: '📱 جلسات', callback_data: 'stats_sessions' },
-                            { text: '🔗 روابط', callback_data: 'stats_links' }
-                        ],
-                        [
-                            { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                        ]
-                    ]
-                };
-                
-                const statsMessage = `
-📊 *إحصائيات النظام*
-
-*📱 جلسات واتساب:*
-• الإجمالي: ${stats.totalSessions}
-• النشطة: ${stats.readySessions}
-• قيد الانتظار: ${stats.sessionsByStatus?.awaiting_qr || 0}
-• متصلة: ${stats.sessionsByStatus?.ready || 0}
-
-*🔗 الروابط المجمعة:*
-• الإجمالي: ${totalLinks}
-• روابط واتساب: ${await CollectedLink.count({ where: { category: 'whatsapp' } })}
-• روابط تليجرام: ${await CollectedLink.count({ where: { category: 'telegram' } })}
-
-*📢 الإعلانات:*
-• الإجمالي: ${totalAds}
-• النشطة: ${await Advertisement.count({ where: { isActive: true } })}
-
-*🤖 الردود التلقائية:*
-• الإجمالي: ${totalReplies}
-• النشطة: ${await AutoReply.count({ where: { isActive: true } })}
-
-*👥 المشرفين:*
-• الإجمالي: ${await Admin.count()}
-• النشطون: ${await Admin.count({ where: { isActive: true } })}
-
-*⏱️ وقت التشغيل:* ${Math.floor(process.uptime() / 3600)} ساعة
-                `;
-                
-                this.bot.sendMessage(chatId, statsMessage, { 
-                    parse_mode: 'Markdown',
-                    reply_markup: statsKeyboard
-                });
-                
-            } catch (error) {
-                console.error('خطأ في /stats:', error);
-                this.bot.sendMessage(chatId, '❌ حدث خطأ في جلب الإحصائيات');
-            }
-        });
     }
     
     // ============================================
-    // 3. أوامر الجلسات مع أزرار
+    // 3. قائمة لغير المشرفين
     // ============================================
-    setupSessionCommands() {
-        // /sessions
-        this.bot.onText(/\/sessions/, async (msg) => {
-            await this.showSessionsMenu(msg.chat.id, msg.from.id);
-        });
-    }
-    
-    // عرض قائمة الجلسات مع الأزرار
-    async showSessionsMenu(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            const sessions = await WhatsAppSession.findAll({ 
-                where: { adminId: admin.id },
-                order: [['createdAt', 'DESC']]
-            });
-            
-            const sessionKeyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '➕ إضافة جلسة', callback_data: 'session_add' },
-                        { text: '🔄 تحديث', callback_data: 'session_refresh' }
-                    ],
-                    [
-                        { text: '📋 جميع الجلسات', callback_data: 'session_list' },
-                        { text: '✅ النشطة فقط', callback_data: 'session_active' }
-                    ],
-                    [
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            let message = `*📱 إدارة جلسات واتساب*\n\n`;
-            
-            if (sessions.length === 0) {
-                message += `📭 *لا توجد جلسات واتساب*\n\n`;
-                message += `استخدم زر ➕ إضافة جلسة لبدء ربط حساب واتساب.`;
-            } else {
-                const activeSessions = sessions.filter(s => s.status === 'ready').length;
-                message += `📊 *الإحصائيات:*\n`;
-                message += `• الإجمالي: ${sessions.length} جلسة\n`;
-                message += `• النشطة: ${activeSessions} جلسة\n`;
-                message += `• قيد الانتظار: ${sessions.filter(s => s.status === 'awaiting_qr').length} جلسة\n\n`;
-                message += `استخدم الأزرار أدناه للإدارة:`;
-            }
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: sessionKeyboard
-            });
-            
-        } catch (error) {
-            console.error('خطأ في عرض قائمة الجلسات:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض الجلسات');
-        }
-    }
-    
-    // عرض الجلسات التفصيلي
-    async showSessionsList(chatId, userId, filter = 'all') {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            let whereCondition = { adminId: admin.id };
-            if (filter === 'active') {
-                whereCondition.status = 'ready';
-            } else if (filter === 'pending') {
-                whereCondition.status = 'awaiting_qr';
-            }
-            
-            const sessions = await WhatsAppSession.findAll({ 
-                where: whereCondition,
-                order: [['createdAt', 'DESC']],
-                limit: 10
-            });
-            
-            if (sessions.length === 0) {
-                const keyboard = {
-                    inline_keyboard: [
-                        [
-                            { text: '➕ إضافة جلسة', callback_data: 'session_add' },
-                            { text: '📋 القائمة', callback_data: 'session_list' }
-                        ],
-                        [
-                            { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                        ]
-                    ]
-                };
-                
-                return this.bot.sendMessage(chatId,
-                    `📭 *لا توجد جلسات ${filter === 'active' ? 'نشطة' : ''}*\n\n` +
-                    `استخدم زر ➕ إضافة جلسة لبدء ربط حساب واتساب.`,
-                    { 
-                        parse_mode: 'Markdown',
-                        reply_markup: keyboard
-                    }
-                );
-            }
-            
-            let message = `*📱 ${filter === 'active' ? 'الجلسات النشطة' : 'جميع الجلسات'} (${sessions.length})*\n\n`;
-            
-            sessions.forEach((session, index) => {
-                const statusEmoji = {
-                    'ready': '✅',
-                    'awaiting_qr': '📱',
-                    'authenticating': '🔐',
-                    'disconnected': '❌',
-                    'error': '⚠️',
-                    'pending': '⏳'
-                }[session.status] || '❓';
-                
-                message += `${index + 1}. ${statusEmoji} *${session.phoneNumber || 'بدون رقم'}*\n`;
-                message += `   🆔 \`${session.sessionId?.substring(0, 8) || session.id.substring(0, 8)}\`\n`;
-                message += `   📊 ${session.status}\n`;
-                message += `   📅 ${moment(session.createdAt).fromNow()}\n`;
-                
-                if (session.status === 'ready') {
-                    message += `   ⚡ [إرسال رسالة](/send_${session.id}) | `;
-                    message += `[مجموعات](/groups_${session.id})\n`;
-                } else if (session.status === 'awaiting_qr') {
-                    message += `   📲 [عرض QR](/qr_${session.id})\n`;
-                }
-                
-                message += `   🗑️ [حذف](/delete_${session.id})\n\n`;
-            });
-            
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '➕ إضافة جلسة', callback_data: 'session_add' },
-                        { text: '🔄 تحديث', callback_data: 'session_refresh' }
-                    ],
-                    [
-                        { text: '✅ النشطة فقط', callback_data: 'session_active' },
-                        { text: '📋 الكل', callback_data: 'session_list' }
-                    ],
-                    [
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            message += `\n📌 *استخدم الأزرار للإدارة:*`;
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: keyboard,
-                disable_web_page_preview: true
-            });
-            
-        } catch (error) {
-            console.error('خطأ في عرض قائمة الجلسات:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض الجلسات');
-        }
-    }
-    
-    // ============================================
-    // 4. أوامر الروابط مع أزرار
-    // ============================================
-    setupLinkCommands() {
-        // /links
-        this.bot.onText(/\/links/, async (msg) => {
-            await this.showLinksMenu(msg.chat.id, msg.from.id);
-        });
-    }
-    
-    // عرض قائمة الروابط
-    async showLinksMenu(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            const linksKeyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '📱 روابط واتساب', callback_data: 'links_whatsapp' },
-                        { text: '📢 روابط تليجرام', callback_data: 'links_telegram' }
-                    ],
-                    [
-                        { text: '🌐 جميع المواقع', callback_data: 'links_websites' },
-                        { text: '📊 الإحصائيات', callback_data: 'links_stats' }
-                    ],
-                    [
-                        { text: '🔍 جمع جديد', callback_data: 'links_collect' },
-                        { text: '📥 تصدير', callback_data: 'links_export' }
-                    ],
-                    [
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            const totalLinks = await CollectedLink.count();
-            const whatsappLinks = await CollectedLink.count({ where: { category: 'whatsapp' } });
-            const telegramLinks = await CollectedLink.count({ where: { category: 'telegram' } });
-            
-            let message = `*🔗 إدارة الروابط المجمعة*\n\n`;
-            
-            if (totalLinks === 0) {
-                message += `🔍 *لا توجد روابط مجمعة بعد*\n\n`;
-                message += `سيتم جمع الروابط تلقائياً من جلسات واتساب.`;
-            } else {
-                message += `📊 *الإحصائيات:*\n`;
-                message += `• الإجمالي: ${totalLinks} رابط\n`;
-                message += `• واتساب: ${whatsappLinks} رابط\n`;
-                message += `• تليجرام: ${telegramLinks} رابط\n`;
-                message += `• مواقع: ${totalLinks - whatsappLinks - telegramLinks} رابط\n\n`;
-                message += `استخدم الأزرار أدناه للتصفية والإدارة:`;
-            }
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: linksKeyboard
-            });
-            
-        } catch (error) {
-            console.error('خطأ في عرض قائمة الروابط:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض الروابط');
-        }
-    }
-    
-    // ============================================
-    // 5. أوامر الإعلانات مع أزرار
-    // ============================================
-    setupAdCommands() {
-        // /ads
-        this.bot.onText(/\/ads/, async (msg) => {
-            await this.showAdsMenu(msg.chat.id, msg.from.id);
-        });
-    }
-    
-    // عرض قائمة الإعلانات
-    async showAdsMenu(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            const adsKeyboard = {
-                inline_keyboard: [
-                    [
-                        { text: '➕ إضافة إعلان', callback_data: 'ad_add' },
-                        { text: '📋 قائمة الإعلانات', callback_data: 'ad_list' }
-                    ],
-                    [
-                        { text: '✅ النشطة', callback_data: 'ad_active' },
-                        { text: '📊 إحصائيات', callback_data: 'ad_stats' }
-                    ],
-                    [
-                        { text: '🚀 نشر تلقائي', callback_data: 'menu_autopost' },
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            const totalAds = await Advertisement.count({ where: { adminId: admin.id } });
-            const activeAds = await Advertisement.count({ 
-                where: { 
-                    adminId: admin.id,
-                    isActive: true 
-                } 
-            });
-            
-            let message = `*📢 إدارة الإعلانات*\n\n`;
-            
-            if (totalAds === 0) {
-                message += `📭 *لا توجد إعلانات*\n\n`;
-                message += `استخدم زر ➕ إضافة إعلان لبدء إنشاء إعلانك الأول.`;
-            } else {
-                message += `📊 *الإحصائيات:*\n`;
-                message += `• الإجمالي: ${totalAds} إعلان\n`;
-                message += `• النشطة: ${activeAds} إعلان\n\n`;
-                
-                // آخر 3 إعلانات
-                const recentAds = await Advertisement.findAll({
-                    where: { adminId: admin.id },
-                    order: [['createdAt', 'DESC']],
-                    limit: 3
-                });
-                
-                message += `📌 *آخر الإعلانات:*\n`;
-                recentAds.forEach((ad, index) => {
-                    const typeEmoji = {
-                        'text': '📝',
-                        'image': '🖼️',
-                        'video': '🎥',
-                        'contact': '👤',
-                        'document': '📄'
-                    }[ad.type] || '📢';
-                    
-                    message += `${index + 1}. ${typeEmoji} ${ad.content.substring(0, 30)}...\n`;
-                });
-                
-                message += `\nاستخدم الأزرار أدناه للإدارة:`;
-            }
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: adsKeyboard
-            });
-            
-        } catch (error) {
-            console.error('خطأ في عرض قائمة الإعلانات:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض الإعلانات');
-        }
-    }
-    
-    // ============================================
-    // 6. أوامر النشر التلقائي مع أزرار
-    // ============================================
-    setupAutoPostCommands() {
-        // /autopost
-        this.bot.onText(/\/autopost/, async (msg) => {
-            await this.showAutoPostMenu(msg.chat.id, msg.from.id);
-        });
-    }
-    
-    // عرض قائمة النشر التلقائي
-    async showAutoPostMenu(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            const isActive = this.activeAutoPosts.has(admin.id);
-            const activePost = isActive ? this.activeAutoPosts.get(admin.id) : null;
-            
-            const autopostKeyboard = {
-                inline_keyboard: [
-                    [
-                        { text: isActive ? '🛑 إيقاف النشر' : '🚀 بدء النشر', 
-                          callback_data: isActive ? 'autopost_stop' : 'autopost_start' }
-                    ],
-                    [
-                        { text: '⚡ إعدادات الفاصل', callback_data: 'autopost_settings' },
-                        { text: '📋 قائمة النشر', callback_data: 'autopost_list' }
-                    ],
-                    [
-                        { text: '📢 الإعلانات', callback_data: 'menu_ads' },
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                    ]
-                ]
-            };
-            
-            let message = `*🚀 النشر التلقائي*\n\n`;
-            
-            if (isActive && activePost) {
-                const ad = await Advertisement.findByPk(activePost.adId);
-                const adContent = ad ? ad.content.substring(0, 50) + '...' : 'غير معروف';
-                
-                message += `✅ *الحالة:* نشط\n`;
-                message += `📢 *الإعلان:* ${adContent}\n`;
-                message += `⏱️ *الفاصل:* ${activePost.interval}ms\n`;
-                message += `📅 *بدأ في:* ${moment(activePost.startedAt).fromNow()}\n`;
-                message += `📨 *تم إرسال:* ${activePost.stats?.sent || 0}\n`;
-                message += `❌ *فشل:* ${activePost.stats?.failed || 0}\n\n`;
-                
-                message += `🛑 استخدم زر إيقاف النشر لإيقافه.`;
-            } else {
-                message += `❌ *الحالة:* متوقف\n\n`;
-                message += `🚀 استخدم زر بدء النشر لبدء النشر التلقائي.\n`;
-                message += `📋 تأكد من وجود إعلانات نشطة أولاً.`;
-            }
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: autopostKeyboard
-            });
-            
-        } catch (error) {
-            console.error('خطأ في عرض قائمة النشر:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض حالة النشر');
-        }
-    }
-    
-    // ============================================
-    // 7. أوامر الانضمام التلقائي مع أزرار
-    // ============================================
-    setupJoinCommands() {
-        // /join
-        this.bot.onText(/\/join/, async (msg) => {
-            await this.showJoinMenu(msg.chat.id, msg.from.id);
-        });
-    }
-    
-    // عرض قائمة الانضمام
-    async showJoinMenu(chatId, userId) {
-        const isAutoJoinEnabled = process.env.AUTO_JOIN_ENABLED === 'true';
-        
-        const joinKeyboard = {
+    async showNonAdminMenu(chatId, user) {
+        const keyboard = {
             inline_keyboard: [
                 [
-                    { text: isAutoJoinEnabled ? '❌ تعطيل الانضمام' : '✅ تفعيل الانضمام', 
-                      callback_data: isAutoJoinEnabled ? 'join_disable' : 'join_enable' }
+                    { text: '👑 طلب صلاحية مشرف', callback_data: 'request_admin_access' },
+                    { text: '📞 تواصل مع المطور', url: 'https://t.me/username' }
                 ],
                 [
-                    { text: '🔗 اختبار رابط', callback_data: 'join_test' },
-                    { text: '📊 إحصائيات', callback_data: 'join_stats' }
-                ],
-                [
-                    { text: '👥 المجموعات', callback_data: 'join_groups' },
-                    { text: '🏠 الرئيسية', callback_data: 'menu_main' }
+                    { text: '📚 دليل الاستخدام', callback_data: 'nonadmin_guide' },
+                    { text: 'ℹ️ عن البوت', callback_data: 'nonadmin_about' }
                 ]
             ]
         };
         
         const message = `
-*👥 الانضمام التلقائي للمجموعات*
+👋 *مرحباً ${user.first_name || 'عزيزي'}!*
 
-✅ *الميزات المتاحة:*
-• الانضمام التلقائي لروابط واتساب
-• استخراج الروابط من الرسائل
-• تجنب المجموعات المغلقة
-• تسجيل النتائج
+🤖 *بوت إدارة حسابات واتساب*
 
-🔧 *الإعدادات الحالية:*
-• الحالة: ${isAutoJoinEnabled ? '✅ مفعل' : '❌ معطل'}
-• فحص كل: ${process.env.AUTO_JOIN_CHECK_INTERVAL || 30000}ms
-• تأخير بين المحاولات: ${process.env.AUTO_JOIN_DELAY_BETWEEN || 2000}ms
+🚀 *مميزات البوت:*
+• ربط حساب واتساب كجهاز مصاحب
+• إدارة متعددة للحسابات
+• نشر إعلانات تلقائياً
+• جمع روابط المجموعات
+• انضمام تلقائي للمجموعات
 
-📌 *استخدم الأزرار للتحكم:*
+🔒 *للأسف أنت لست مشرفاً في النظام*
+يمكنك طلب الصلاحية أو التواصل مع المطور.
+
+💡 *اختر أحد الخيارات أدناه:*
         `;
         
-        this.bot.sendMessage(chatId, message, { 
+        this.bot.sendMessage(chatId, message, {
             parse_mode: 'Markdown',
-            reply_markup: joinKeyboard
+            reply_markup: keyboard
         });
     }
     
     // ============================================
-    // 8. معالجة الأزرار التفاعلية
+    // 4. القائمة الرئيسية للمشرفين
+    // ============================================
+    async showMainMenu(chatId, admin) {
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📱 إدارة الجلسات', callback_data: 'menu_sessions' },
+                    { text: '🔗 جمع الروابط', callback_data: 'menu_links' }
+                ],
+                [
+                    { text: '📢 الإعلانات', callback_data: 'menu_ads' },
+                    { text: '🚀 النشر التلقائي', callback_data: 'menu_autopost' }
+                ],
+                [
+                    { text: '👥 الانضمام التلقائي', callback_data: 'menu_join' },
+                    { text: '🤖 الردود التلقائية', callback_data: 'menu_autoreply' }
+                ],
+                [
+                    { text: '👑 إدارة المشرفين', callback_data: 'menu_admins' },
+                    { text: '📊 الإحصائيات', callback_data: 'menu_stats' }
+                ],
+                [
+                    { text: '⚙️ الإعدادات', callback_data: 'menu_settings' },
+                    { text: '🆘 المساعدة', callback_data: 'menu_help' }
+                ]
+            ]
+        };
+        
+        const sessionsCount = await WhatsAppSession.count({ where: { adminId: admin.id } });
+        const activeSessions = await WhatsAppSession.count({ 
+            where: { 
+                adminId: admin.id,
+                status: 'ready'
+            }
+        });
+        
+        const message = `
+🎮 *القائمة الرئيسية*
+
+🌟 *مرحباً ${admin.firstName || 'مشرف'}!*
+
+📊 *نظرة سريعة على حسابك:*
+• 📱 الجلسات: ${sessionsCount} (${activeSessions} نشطة)
+• 👑 الصلاحيات: ${admin.permissions.join(', ')}
+• ✅ الحالة: ${admin.isActive ? 'نشط' : 'معطل'}
+
+🚀 *جميع الميزات متاحة عبر الأزرار أدناه:*
+
+💡 *نصائح سريعة:*
+• استخدم "📱 إدارة الجلسات" لربط واتساب
+• "👑 إدارة المشرفين" لإضافة فريقك
+• "📢 الإعلانات" لإنشاء حملات نشر
+• "📊 الإحصائيات" لمتابعة الأداء
+        `;
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 5. تعطيل جميع الأوامر التقليدية
+    // ============================================
+    setupCommandBlockers() {
+        const blockedCommands = [
+            '/help', '/sessions', '/links', '/ads', '/autopost', 
+            '/join', '/autoreply', '/admin', '/stats', '/settings'
+        ];
+        
+        blockedCommands.forEach(command => {
+            this.bot.onText(new RegExp(`^${command}`), async (msg) => {
+                const chatId = msg.chat.id;
+                
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            { text: '🏠 العودة للقائمة', callback_data: 'main_menu' },
+                            { text: '🔄 إرسال /start', callback_data: 'send_start' }
+                        ]
+                    ]
+                };
+                
+                this.bot.sendMessage(chatId,
+                    `⚠️ *هذا الأمر غير متاح!*\n\n` +
+                    `تم استبدال الأمر *${command}* بنظام *الأزرار التفاعلية*.\n\n` +
+                    `🔧 *لماذا هذا التغيير؟*\n` +
+                    `• تجربة مستخدم أفضل\n` +
+                    `• وصول أسرع للميزات\n` +
+                    `• واجهة أكثر تنظيماً\n\n` +
+                    `🎮 *الطريقة الصحيحة:*\n` +
+                    `1. أرسل */start*\n` +
+                    `2. استخدم الأزرار للتنقل\n` +
+                    `3. كل الميزات متاحة عبر الأزرار`,
+                    {
+                        parse_mode: 'Markdown',
+                        reply_markup: keyboard
+                    }
+                );
+            });
+        });
+    }
+    
+    // ============================================
+    // 6. معالجة جميع الأزرار التفاعلية
     // ============================================
     setupCallbackHandlers() {
         this.bot.on('callback_query', async (query) => {
@@ -736,34 +226,48 @@ class TelegramBotHandler {
             const data = query.data;
             
             try {
-                // الرد على الاستعلام أولاً
+                // الرد الفوري على Callback
                 await this.bot.answerCallbackQuery(query.id);
                 
-                // معالجة البيانات حسب النوع
-                if (data.startsWith('menu_')) {
-                    await this.handleMenuActions(chatId, userId, data);
-                } 
-                else if (data.startsWith('session_')) {
-                    await this.handleSessionActions(chatId, userId, data, query);
+                // التحقق من صلاحية المشرف
+                const admin = await Admin.findOne({ where: { telegramId: userId } });
+                
+                // الأزرار المسموحة لغير المشرفين
+                const publicButtons = [
+                    'request_admin_access', 'nonadmin_guide', 'nonadmin_about',
+                    'send_start', 'main_menu'
+                ];
+                
+                if (!admin && !publicButtons.includes(data)) {
+                    return this.showNonAdminMenu(chatId, query.from);
                 }
-                else if (data.startsWith('links_')) {
-                    await this.handleLinkActions(chatId, userId, data);
+                
+                // توجيه الزر للدالة المناسبة
+                if (data.startsWith('menu_')) {
+                    await this.handleMainMenu(chatId, admin, data);
+                }
+                else if (data.startsWith('session_')) {
+                    await this.handleSessionActions(chatId, admin, data);
+                }
+                else if (data.startsWith('admin_')) {
+                    await this.handleAdminActions(chatId, admin, data);
                 }
                 else if (data.startsWith('ad_')) {
-                    await this.handleAdActions(chatId, userId, data);
+                    await this.handleAdActions(chatId, admin, data);
                 }
-                else if (data.startsWith('autopost_')) {
-                    await this.handleAutoPostActions(chatId, userId, data);
+                else if (data === 'request_admin_access') {
+                    await this.handleAdminRequest(chatId, userId, query);
                 }
-                else if (data.startsWith('join_')) {
-                    await this.handleJoinActions(chatId, userId, data);
+                else if (data === 'send_start') {
+                    const msg = { chat: { id: chatId }, from: { id: userId } };
+                    this.bot.processUpdate({ message: msg });
                 }
-                else if (data.startsWith('stats_')) {
-                    await this.handleStatsActions(chatId, userId, data);
+                else if (data === 'main_menu') {
+                    await this.showMainMenu(chatId, admin);
                 }
                 
             } catch (error) {
-                console.error('خطأ في معالجة Callback:', error);
+                console.error('Error in callback handler:', error);
                 this.bot.answerCallbackQuery(query.id, {
                     text: 'حدث خطأ في المعالجة',
                     show_alert: true
@@ -772,216 +276,143 @@ class TelegramBotHandler {
         });
     }
     
-    // معالجة إجراءات القوائم
-    async handleMenuActions(chatId, userId, action) {
+    // ============================================
+    // 7. معالجة القوائم الرئيسية
+    // ============================================
+    async handleMainMenu(chatId, admin, action) {
         switch (action) {
-            case 'menu_main':
-            case 'menu_start':
-                await this.bot.sendMessage(chatId, '🏠 *العودة للقائمة الرئيسية*', { parse_mode: 'Markdown' });
-                // إعادة إرسال رسالة /start
-                const msg = { chat: { id: chatId }, from: { id: userId } };
-                this.bot.processUpdate({ message: msg });
-                break;
-                
             case 'menu_sessions':
-                await this.showSessionsMenu(chatId, userId);
-                break;
-                
-            case 'menu_links':
-                await this.showLinksMenu(chatId, userId);
+                await this.showSessionsMenu(chatId, admin);
                 break;
                 
             case 'menu_ads':
-                await this.showAdsMenu(chatId, userId);
+                await this.showAdsMenu(chatId, admin);
                 break;
                 
-            case 'menu_autopost':
-                await this.showAutoPostMenu(chatId, userId);
-                break;
-                
-            case 'menu_join':
-                await this.showJoinMenu(chatId, userId);
-                break;
-                
-            case 'menu_autoreply':
-                // سيتم تنفيذها لاحقاً
-                this.bot.sendMessage(chatId, '🤖 *قريباً: الردود التلقائية*', { parse_mode: 'Markdown' });
+            case 'menu_admins':
+                await this.showAdminsMenu(chatId, admin);
                 break;
                 
             case 'menu_stats':
-                await this.bot.sendMessage(chatId, '📊 *جاري جلب الإحصائيات...*', { parse_mode: 'Markdown' });
-                const msg2 = { chat: { id: chatId }, from: { id: userId } };
-                this.bot.processUpdate({ message: msg2 });
+                await this.showStatsMenu(chatId, admin);
                 break;
                 
             case 'menu_help':
-                await this.bot.sendMessage(chatId, '🆘 *جاري تحميل المساعدة...*', { parse_mode: 'Markdown' });
-                const msg3 = { chat: { id: chatId }, from: { id: userId } };
-                this.bot.processUpdate({ message: msg3 });
-                break;
-        }
-    }
-    
-    // معالجة إجراءات الجلسات
-    async handleSessionActions(chatId, userId, action, query) {
-        switch (action) {
-            case 'session_add':
-                await this.startAddSession(chatId, userId);
+                await this.showHelpMenu(chatId);
                 break;
                 
-            case 'session_refresh':
-                await this.showSessionsMenu(chatId, userId);
+            case 'menu_settings':
+                await this.showSettingsMenu(chatId, admin);
                 break;
                 
-            case 'session_list':
-                await this.showSessionsList(chatId, userId, 'all');
+            case 'menu_links':
+            case 'menu_autopost':
+            case 'menu_join':
+            case 'menu_autoreply':
+                await this.showComingSoon(chatId, action.replace('menu_', ''));
                 break;
                 
-            case 'session_active':
-                await this.showSessionsList(chatId, userId, 'active');
-                break;
-                
-            case 'session_pending':
-                await this.showSessionsList(chatId, userId, 'pending');
-                break;
-        }
-    }
-    
-    // معالجة إجراءات الروابط
-    async handleLinkActions(chatId, userId, action) {
-        const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-        if (!admin) return;
-        
-        switch (action) {
-            case 'links_whatsapp':
-                await this.showLinksByCategory(chatId, admin.id, 'whatsapp');
-                break;
-                
-            case 'links_telegram':
-                await this.showLinksByCategory(chatId, admin.id, 'telegram');
-                break;
-                
-            case 'links_websites':
-                await this.showLinksByCategory(chatId, admin.id, 'website');
-                break;
-                
-            case 'links_stats':
-                await this.showLinksStats(chatId, admin.id);
-                break;
-                
-            case 'links_collect':
-                await this.collectLinksNow(chatId, userId);
-                break;
-                
-            case 'links_export':
-                await this.exportLinks(chatId, admin.id);
-                break;
-        }
-    }
-    
-    // معالجة إجراءات الإعلانات
-    async handleAdActions(chatId, userId, action) {
-        switch (action) {
-            case 'ad_add':
-                await this.startAddAd(chatId, userId);
-                break;
-                
-            case 'ad_list':
-                await this.showAdsList(chatId, userId);
-                break;
-                
-            case 'ad_active':
-                await this.showActiveAds(chatId, userId);
-                break;
-                
-            case 'ad_stats':
-                await this.showAdStats(chatId, userId);
-                break;
-        }
-    }
-    
-    // معالجة إجراءات النشر التلقائي
-    async handleAutoPostActions(chatId, userId, action) {
-        const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-        if (!admin) return;
-        
-        switch (action) {
-            case 'autopost_start':
-                await this.startAutoPostProcess(chatId, userId);
-                break;
-                
-            case 'autopost_stop':
-                await this.stopAutoPosting(admin.id);
-                await this.showAutoPostMenu(chatId, userId);
-                break;
-                
-            case 'autopost_settings':
-                await this.showAutoPostSettings(chatId, userId);
-                break;
-                
-            case 'autopost_list':
-                await this.showAutoPostList(chatId, userId);
-                break;
-        }
-    }
-    
-    // معالجة إجراءات الانضمام
-    async handleJoinActions(chatId, userId, action) {
-        switch (action) {
-            case 'join_enable':
-                await this.enableAutoJoin(chatId);
-                break;
-                
-            case 'join_disable':
-                await this.disableAutoJoin(chatId);
-                break;
-                
-            case 'join_test':
-                await this.testJoinLink(chatId, userId);
-                break;
-                
-            case 'join_stats':
-                await this.showJoinStats(chatId);
-                break;
-                
-            case 'join_groups':
-                await this.showJoinedGroups(chatId, userId);
-                break;
-        }
-    }
-    
-    // معالجة إجراءات الإحصائيات
-    async handleStatsActions(chatId, userId, action) {
-        switch (action) {
-            case 'stats_refresh':
-                const msg = { chat: { id: chatId }, from: { id: userId } };
-                this.bot.processUpdate({ message: msg });
-                break;
-                
-            case 'stats_details':
-                await this.showDetailedStats(chatId, userId);
-                break;
-                
-            case 'stats_sessions':
-                await this.showSessionStats(chatId, userId);
-                break;
-                
-            case 'stats_links':
-                await this.showLinkStats(chatId, userId);
-                break;
+            default:
+                await this.showMainMenu(chatId, admin);
         }
     }
     
     // ============================================
-    // 9. دوال مساعدة للأزرار
+    // 8. قائمة الجلسات مع الأزرار
     // ============================================
-    
-    // بدء إضافة جلسة
-    async startAddSession(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
+    async showSessionsMenu(chatId, admin) {
+        const sessions = await WhatsAppSession.findAll({
+            where: { adminId: admin.id },
+            order: [['createdAt', 'DESC']],
+            limit: 8
+        });
+        
+        const activeCount = sessions.filter(s => s.status === 'ready').length;
+        const pendingCount = sessions.filter(s => s.status === 'awaiting_qr').length;
+        
+        // إنشاء لوحة الأزرار
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📱➕ ربط حساب جديد', callback_data: 'session_add_new' },
+                    { text: '🔄 تحديث القائمة', callback_data: 'menu_sessions' }
+                ]
+            ]
+        };
+        
+        // إضافة أزرار للجلسات الحالية
+        if (sessions.length > 0) {
+            // أول 4 جلسات كأزرار فردية
+            sessions.slice(0, 4).forEach(session => {
+                const emoji = session.status === 'ready' ? '✅' : 
+                            session.status === 'awaiting_qr' ? '📱' : '❌';
+                const shortId = session.sessionId?.substring(0, 6) || session.id.substring(0, 6);
+                
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `${emoji} ${session.phoneNumber || shortId}`,
+                        callback_data: `session_view_${session.id}`
+                    }
+                ]);
+            });
             
+            // إذا كان هناك أكثر من 4 ج sessionsات، نضيف زر لعرض الكل
+            if (sessions.length > 4) {
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `📋 عرض جميع الجلسات (${sessions.length})`,
+                        callback_data: 'session_view_all'
+                    }
+                ]);
+            }
+        }
+        
+        // إضافة أزرار إضافية
+        keyboard.inline_keyboard.push([
+            { text: '📊 إحصائيات الجلسات', callback_data: 'session_stats' },
+            { text: '⚙️ إعدادات الجلسات', callback_data: 'session_settings' }
+        ]);
+        
+        keyboard.inline_keyboard.push([
+            { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+        ]);
+        
+        // إنشاء الرسالة
+        let message = `*📱 إدارة جلسات واتساب*\n\n`;
+        
+        message += `📊 *إحصائيات حسابك:*\n`;
+        message += `• 📞 الإجمالي: ${sessions.length} جلسة\n`;
+        message += `• ✅ نشطة: ${activeCount} جلسة\n`;
+        message += `• 📱 بانتظار QR: ${pendingCount} جلسة\n`;
+        message += `• ❌ غير نشطة: ${sessions.length - activeCount - pendingCount} جلسة\n\n`;
+        
+        if (sessions.length === 0) {
+            message += `📭 *لا توجد جلسات واتساب بعد*\n\n`;
+            message += `🔗 *كيفية الربط كجهاز مصاحب:*\n`;
+            message += `1. انقر على "📱➕ ربط حساب جديد"\n`;
+            message += `2. أرسل رقم هاتفك مع رمز الدولة\n`;
+            message += `3. امسح QR Code من واتساب\n`;
+            message += `4. انتظر تأكيد الاتصال\n\n`;
+            message += `💡 *مثال للرقم:* \`+966501234567\``;
+        } else {
+            message += `*الجلسات المتاحة:* (انقر لعرض التفاصيل)\n\n`;
+            message += `💡 *نصائح سريعة:*\n`;
+            message += `• الجلسات النشطة (✅) جاهزة للاستخدام\n`;
+            message += `• الجلسات بانتظار QR (📱) تحتاج للمسح\n`;
+            message += `• انقر على أي جلسة لعرض خياراتها`;
+        }
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 9. إضافة جلسة جديدة
+    // ============================================
+    async handleSessionActions(chatId, admin, action) {
+        if (action === 'session_add_new') {
             // التحقق من الحد الأقصى
             const sessionCount = await WhatsAppSession.count({ where: { adminId: admin.id } });
             const maxSessions = parseInt(process.env.WHATSAPP_MAX_SESSIONS) || 5;
@@ -990,8 +421,8 @@ class TelegramBotHandler {
                 const keyboard = {
                     inline_keyboard: [
                         [
-                            { text: '🗑️ حذف جلسة', callback_data: 'session_list' },
-                            { text: '📋 القائمة', callback_data: 'session_list' }
+                            { text: '🗑️ حذف جلسة', callback_data: 'session_view_all' },
+                            { text: '📋 إدارة الجلسات', callback_data: 'menu_sessions' }
                         ]
                     ]
                 };
@@ -999,8 +430,12 @@ class TelegramBotHandler {
                 return this.bot.sendMessage(chatId,
                     `❌ *وصلت للحد الأقصى!*\n\n` +
                     `لديك ${sessionCount} من أصل ${maxSessions} جلسة.\n` +
-                    `يرجى حذف جلسة قبل إضافة جديدة.`,
-                    { 
+                    `💡 *الحلول المقترحة:*\n` +
+                    `1. حذف جلسات غير مستخدمة\n` +
+                    `2. ترقية الخطة لزيادة الحد\n` +
+                    `3. الانتظار لتجديد الجلسات\n\n` +
+                    `🔧 *اختر أحد الخيارات:*`,
+                    {
                         parse_mode: 'Markdown',
                         reply_markup: keyboard
                     }
@@ -1008,203 +443,630 @@ class TelegramBotHandler {
             }
             
             // حفظ حالة المستخدم
-            this.userStates.set(userId, {
+            this.userStates.set(admin.telegramId, {
                 state: 'awaiting_phone_for_session',
-                data: { adminId: admin.id }
+                adminId: admin.id,
+                timestamp: Date.now()
             });
             
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '❌ إلغاء', callback_data: 'menu_sessions' }
+                        { text: '❌ إلغاء العملية', callback_data: 'menu_sessions' }
                     ]
                 ]
             };
             
             this.bot.sendMessage(chatId,
-                `🔐 *إضافة جلسة واتساب جديدة*\n\n` +
-                `1. أرسل لي *رقم الهاتف* مع رمز الدولة\n` +
-                `   مثال: \`+966501234567\`\n\n` +
-                `2. سأقوم بإنشاء جلسة وإرسال QR code\n\n` +
-                `3. امسح QR من تطبيق واتساب\n\n` +
-                `❌ للإلغاء استخدم الزر أدناه`,
-                { 
+                `📱 *إضافة جلسة واتساب جديدة*\n\n` +
+                `🚀 *خطوات الربط كجهاز مصاحب:*\n\n` +
+                `1. **أرسل رقم هاتفك** مع رمز الدولة\n` +
+                `   📞 مثال: \`+966501234567\`\n` +
+                `   📞 مثال: \`+971501234567\`\n\n` +
+                `2. **سأنشئ جلسة WhatsApp Web**\n` +
+                `   🔧 اتصال آمن وسريع\n\n` +
+                `3. **سأرسل لك QR Code**\n` +
+                `   📱 صورة للربط\n\n` +
+                `4. **افتح واتساب على هاتفك**\n` +
+                `   📲 تطبيق WhatsApp الرسمي\n\n` +
+                `5. **اذهب للإعدادات → الأجهزة المرتبطة**\n` +
+                `   ⚙️ ثم انقر على "ربط جهاز"\n\n` +
+                `6. **امسح QR Code** بالكاميرا\n` +
+                `   📸 توجيه الكاميرا نحو الشاشة\n\n` +
+                `7. **انتظر تأكيد الربط**\n` +
+                `   ✅ سيصبح البوت جهازاً مصاحباً\n\n` +
+                `📝 *أرسل رقم الهاتف الآن:*`,
+                {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard
                 }
             );
-            
-        } catch (error) {
-            console.error('خطأ في بدء إضافة جلسة:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الجلسة');
+        }
+        else if (action === 'session_view_all') {
+            await this.showAllSessions(chatId, admin);
+        }
+        else if (action.startsWith('session_view_')) {
+            const sessionId = action.replace('session_view_', '');
+            await this.showSessionDetails(chatId, admin, sessionId);
+        }
+        else if (action === 'session_stats') {
+            await this.showSessionStats(chatId, admin);
         }
     }
     
-    // عرض الروابط حسب الفئة
-    async showLinksByCategory(chatId, adminId, category) {
-        try {
-            const links = await CollectedLink.findAll({
-                where: { category: category },
-                order: [['collectedAt', 'DESC']],
-                limit: 10
+    // ============================================
+    // 10. قائمة الإعلانات مع الأزرار
+    // ============================================
+    async showAdsMenu(chatId, admin) {
+        const ads = await Advertisement.findAll({
+            where: { adminId: admin.id },
+            order: [['createdAt', 'DESC']],
+            limit: 10
+        });
+        
+        const activeAds = ads.filter(ad => ad.isActive).length;
+        const totalSent = ads.reduce((sum, ad) => sum + (ad.stats?.sent || 0), 0);
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📢➕ إنشاء إعلان', callback_data: 'ad_create_new' },
+                    { text: '📋 قائمة الإعلانات', callback_data: 'ad_list_all' }
+                ]
+            ]
+        };
+        
+        // إضافة أزرار للإعلانات النشطة
+        const activeAdsList = ads.filter(ad => ad.isActive).slice(0, 3);
+        if (activeAdsList.length > 0) {
+            activeAdsList.forEach(ad => {
+                const typeEmoji = {
+                    'text': '📝',
+                    'image': '🖼️',
+                    'video': '🎥',
+                    'contact': '👤',
+                    'document': '📄'
+                }[ad.type] || '📢';
+                
+                const shortContent = ad.content.length > 20 ? 
+                    ad.content.substring(0, 20) + '...' : ad.content;
+                
+                keyboard.inline_keyboard.push([
+                    {
+                        text: `${typeEmoji} ${shortContent}`,
+                        callback_data: `ad_view_${ad.id}`
+                    }
+                ]);
             });
-            
+        }
+        
+        // أزرار إضافية
+        keyboard.inline_keyboard.push([
+            { text: '🚀 النشر التلقائي', callback_data: 'menu_autopost' },
+            { text: '📊 إحصائيات الإعلانات', callback_data: 'ad_stats' }
+        ]);
+        
+        keyboard.inline_keyboard.push([
+            { text: '⚙️ إعدادات الإعلانات', callback_data: 'ad_settings' },
+            { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+        ]);
+        
+        let message = `*📢 إدارة الإعلانات*\n\n`;
+        
+        message += `📊 *إحصائيات حسابك:*\n`;
+        message += `• 📝 الإجمالي: ${ads.length} إعلان\n`;
+        message += `• ✅ نشطة: ${activeAds} إعلان\n`;
+        message += `• 📨 تم إرسال: ${totalSent} مرة\n\n`;
+        
+        if (ads.length === 0) {
+            message += `📭 *لا توجد إعلانات بعد*\n\n`;
+            message += `🎯 *أنواع الإعلانات المتاحة:*\n`;
+            message += `• 📝 نصوص مع تنسيق\n`;
+            message += `• 🖼️ صور مع تعليقات\n`;
+            message += `• 🎥 فيديوهات قصيرة\n`;
+            message += `• 👤 جهات اتصال\n`;
+            message += `• 📄 مستندات وملفات\n\n`;
+            message += `💡 *انقر على "إنشاء إعلان" للبدء*`;
+        } else {
+            message += `*الإعلانات النشطة:* (انقر لعرض التفاصيل)\n\n`;
+            message += `🔧 *استخدم الأزرار للإدارة:*\n`;
+            message += `• إنشاء إعلان جديد\n`;
+            message += `• تعديل الإعلانات الحالية\n`;
+            message += `• ضبط النشر التلقائي\n`;
+            message += `• عرض الإحصائيات`;
+        }
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 11. قائمة إدارة المشرفين مع الأزرار
+    // ============================================
+    async showAdminsMenu(chatId, admin) {
+        // التحقق من الصلاحية
+        if (!admin.permissions.includes('add_admins')) {
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '📱 واتساب', callback_data: 'links_whatsapp' },
-                        { text: '📢 تليجرام', callback_data: 'links_telegram' },
-                        { text: '🌐 مواقع', callback_data: 'links_websites' }
-                    ],
-                    [
-                        { text: '📋 القائمة', callback_data: 'menu_links' },
-                        { text: '🏠 الرئيسية', callback_data: 'menu_main' }
+                        { text: '👑 طلب صلاحية', callback_data: 'request_admin_permission' },
+                        { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
                     ]
                 ]
             };
             
-            let message = `*🔗 روابط ${category === 'whatsapp' ? 'واتساب' : category === 'telegram' ? 'تليجرام' : 'المواقع'}*\n\n`;
+            return this.bot.sendMessage(chatId,
+                `❌ *غير مصرح!*\n\n` +
+                `ليست لديك صلاحية إدارة المشرفين.\n\n` +
+                `🔒 *الصلاحية المطلوبة:* \`add_admins\`\n` +
+                `👑 *صلاحياتك الحالية:* ${admin.permissions.join(', ')}\n\n` +
+                `💡 *يمكنك:*\n` +
+                `1. طلب الصلاحية من المشرف الرئيسي\n` +
+                `2. التواصل مع المطور\n` +
+                `3. استخدام الميزات الأخرى`,
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                }
+            );
+        }
+        
+        const admins = await Admin.findAll({
+            order: [['createdAt', 'DESC']]
+        });
+        
+        const activeAdmins = admins.filter(a => a.isActive).length;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '👑➕ إضافة مشرف', callback_data: 'admin_add_new' },
+                    { text: '📋 قائمة المشرفين', callback_data: 'admin_list_all' }
+                ]
+            ]
+        };
+        
+        // إضافة أزرار للمشرفين
+        admins.slice(0, 5).forEach(adminItem => {
+            const statusIcon = adminItem.isActive ? '✅' : '❌';
+            const isCurrent = adminItem.telegramId === admin.telegramId ? ' (أنت)' : '';
+            const displayName = adminItem.firstName || adminItem.username || adminItem.telegramId;
             
-            if (links.length === 0) {
-                message += `📭 *لا توجد روابط في هذه الفئة*\n\n`;
-                message += `سيتم جمع الروابط تلقائياً من جلسات واتساب.`;
-            } else {
-                links.forEach((link, index) => {
-                    message += `${index + 1}. ${link.title || 'بدون عنوان'}\n`;
-                    message += `   \`${link.url.substring(0, 50)}${link.url.length > 50 ? '...' : ''}\`\n`;
-                    message += `   📍 ${link.sourceChat || 'غير معروف'}\n`;
-                    message += `   ⏰ ${moment(link.collectedAt).fromNow()}\n\n`;
+            keyboard.inline_keyboard.push([
+                {
+                    text: `${statusIcon} ${displayName}${isCurrent}`,
+                    callback_data: `admin_view_${adminItem.id}`
+                }
+            ]);
+        });
+        
+        // إذا كان هناك أكثر من 5 مشرفين
+        if (admins.length > 5) {
+            keyboard.inline_keyboard.push([
+                {
+                    text: `📋 عرض الكل (${admins.length})`,
+                    callback_data: 'admin_list_all'
+                }
+            ]);
+        }
+        
+        // أزرار إضافية
+        keyboard.inline_keyboard.push([
+            { text: '⚙️ إدارة الصلاحيات', callback_data: 'admin_manage_permissions' },
+            { text: '📊 إحصائيات المشرفين', callback_data: 'admin_stats' }
+        ]);
+        
+        keyboard.inline_keyboard.push([
+            { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+        ]);
+        
+        let message = `*👑 إدارة المشرفين*\n\n`;
+        
+        message += `📊 *إحصائيات النظام:*\n`;
+        message += `• 👥 الإجمالي: ${admins.length} مشرف\n`;
+        message += `• ✅ نشطين: ${activeAdmins} مشرف\n`;
+        message += `• ❌ معطلين: ${admins.length - activeAdmins} مشرف\n\n`;
+        
+        message += `🔐 *صلاحياتك:* ${admin.permissions.join(', ')}\n\n`;
+        
+        message += `*المشرفون الحاليون:* (انقر لعرض التفاصيل)\n\n`;
+        
+        message += `💡 *معلومات مهمة:*\n`;
+        message += `• يمكنك إضافة مشرفين جدد\n`;
+        message += `• يمكنك تعديل صلاحيات المشرفين\n`;
+        message += `• يمكنك تعطيل/تفعيل المشرفين\n`;
+        message += `• كل تغيير يسجل في النظام`;
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 12. إضافة مشرف جديد
+    // ============================================
+    async handleAdminActions(chatId, admin, action) {
+        if (action === 'admin_add_new') {
+            if (!admin.permissions.includes('add_admins')) {
+                return this.bot.answerCallbackQuery(query.id, {
+                    text: 'ليست لديك صلاحية إضافة مشرفين',
+                    show_alert: true
                 });
             }
             
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: keyboard,
-                disable_web_page_preview: true
+            // حفظ حالة المستخدم
+            this.userStates.set(admin.telegramId, {
+                state: 'awaiting_admin_telegram_id',
+                adminId: admin.id,
+                timestamp: Date.now()
             });
-            
-        } catch (error) {
-            console.error('خطأ في عرض الروابط:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في عرض الروابط');
-        }
-    }
-    
-    // بدء إضافة إعلان
-    async startAddAd(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
             
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '📝 نص', callback_data: 'ad_type_text' },
-                        { text: '🖼️ صورة', callback_data: 'ad_type_image' }
-                    ],
-                    [
-                        { text: '🎥 فيديو', callback_data: 'ad_type_video' },
-                        { text: '📄 مستند', callback_data: 'ad_type_document' }
-                    ],
-                    [
-                        { text: '❌ إلغاء', callback_data: 'menu_ads' }
+                        { text: '❌ إلغاء', callback_data: 'menu_admins' }
                     ]
                 ]
             };
             
             this.bot.sendMessage(chatId,
-                `📢 *إضافة إعلان جديد*\n\n` +
-                `اختر نوع الإعلان:`,
-                { 
+                `👑 *إضافة مشرف جديد*\n\n` +
+                `📝 *كيفية الحصول على رقم التليجرام:*\n\n` +
+                `1. **اطلب من الشخص المراد إضافته**\n` +
+                `   👤 الذي تريد منحه صلاحية المشرف\n\n` +
+                `2. **ليذهب إلى بوت** @userinfobot\n` +
+                `   🤖 بوت معلومات المستخدم\n\n` +
+                `3. **ليرسل** \`/start\` **للبت**\n` +
+                `   🚀 بدء المحادثة\n\n` +
+                `4. **سيرسل له البوت رقمه**\n` +
+                `   🔢 مثل: \`123456789\`\n\n` +
+                `5. **ليعطيك هذا الرقم**\n` +
+                `   📋 يمكن أن يعطيك عدة أرقام\n\n` +
+                `6. **أرسل لي الرقم/الأرقام الآن**\n` +
+                `   💡 مفصولة بفواصل إذا كانت متعددة\n\n` +
+                `📋 *أمثلة:*\n` +
+                `• إضافة شخص واحد: \`123456789\`\n` +
+                `• إضافة عدة أشخاص: \`123456789,987654321,555555555\`\n\n` +
+                `🔢 *أرسل رقم/أرقام التليجرام الآن:*`,
+                {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard
                 }
             );
-            
-        } catch (error) {
-            console.error('خطأ في بدء إضافة إعلان:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في إضافة الإعلان');
+        }
+        else if (action === 'admin_list_all') {
+            await this.showAllAdmins(chatId, admin);
+        }
+        else if (action.startsWith('admin_view_')) {
+            const adminId = action.replace('admin_view_', '');
+            await this.showAdminDetails(chatId, admin, adminId);
         }
     }
     
-    // بدء عملية النشر التلقائي
-    async startAutoPostProcess(chatId, userId) {
-        try {
-            const admin = await Admin.findOne({ where: { telegramId: userId.toString() } });
-            if (!admin) return;
-            
-            if (this.activeAutoPosts.has(admin.id)) {
-                return this.bot.sendMessage(chatId,
-                    '⚠️ *النشر التلقائي يعمل بالفعل!*\n\n' +
-                    'استخدم زر إيقاف النشر لإيقافه أولاً.',
-                    { parse_mode: 'Markdown' }
-                );
+    // ============================================
+    // 13. قائمة الإحصائيات مع الأزرار
+    // ============================================
+    async showStatsMenu(chatId, admin) {
+        const sessionsCount = await WhatsAppSession.count({ where: { adminId: admin.id } });
+        const activeSessions = await WhatsAppSession.count({
+            where: {
+                adminId: admin.id,
+                status: 'ready'
             }
-            
-            const ads = await Advertisement.findAll({
-                where: { 
-                    adminId: admin.id,
-                    isActive: true 
-                }
-            });
-            
-            if (ads.length === 0) {
-                const keyboard = {
-                    inline_keyboard: [
-                        [
-                            { text: '➕ إضافة إعلان', callback_data: 'ad_add' },
-                            { text: '📋 القائمة', callback_data: 'menu_ads' }
-                        ]
-                    ]
-                };
-                
-                return this.bot.sendMessage(chatId,
-                    '❌ *لا توجد إعلانات نشطة!*\n\n' +
-                    'استخدم زر إضافة إعلان لإنشاء إعلان أولاً.',
-                    { 
+        });
+        
+        const adsCount = await Advertisement.count({ where: { adminId: admin.id } });
+        const activeAds = await Advertisement.count({
+            where: {
+                adminId: admin.id,
+                isActive: true
+            }
+        });
+        
+        const totalAdmins = await Admin.count();
+        const activeAdmins = await Admin.count({ where: { isActive: true } });
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📱 جلسات واتساب', callback_data: 'stats_sessions_detail' },
+                    { text: '📢 الإعلانات', callback_data: 'stats_ads_detail' }
+                ],
+                [
+                    { text: '👥 المشرفين', callback_data: 'stats_admins_detail' },
+                    { text: '🔗 الروابط', callback_data: 'stats_links_detail' }
+                ],
+                [
+                    { text: '📊 إحصائيات النظام', callback_data: 'stats_system_detail' },
+                    { text: '📈 تقرير أداء', callback_data: 'stats_performance' }
+                ],
+                [
+                    { text: '🔄 تحديث الإحصائيات', callback_data: 'menu_stats' },
+                    { text: '📥 تصدير التقرير', callback_data: 'stats_export' }
+                ],
+                [
+                    { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        const uptimeHours = Math.floor(process.uptime() / 3600);
+        const memoryUsage = (process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2);
+        
+        const message = `
+📊 *إحصائيات النظام الشاملة*
+
+*📱 جلسات واتساب:*
+• 📞 الإجمالي: ${sessionsCount} جلسة
+• ✅ نشطة: ${activeSessions} جلسة
+• 📈 النسبة: ${sessionsCount > 0 ? ((activeSessions / sessionsCount) * 100).toFixed(1) : 0}%
+
+*📢 الإعلانات:*
+• 📝 الإجمالي: ${adsCount} إعلان
+• ✅ نشطة: ${activeAds} إعلان
+• 📈 النسبة: ${adsCount > 0 ? ((activeAds / adsCount) * 100).toFixed(1) : 0}%
+
+*👥 المشرفين:*
+• 👑 الإجمالي: ${totalAdmins} مشرف
+• ✅ نشطين: ${activeAdmins} مشرف
+• 📈 النسبة: ${totalAdmins > 0 ? ((activeAdmins / totalAdmins) * 100).toFixed(1) : 0}%
+
+*⚙️ معلومات النظام:*
+• ⏱️ وقت التشغيل: ${uptimeHours} ساعة
+• 💾 استخدام الذاكرة: ${memoryUsage} MB
+• 🌐 البيئة: ${process.env.NODE_ENV || 'تطوير'}
+• 🚀 الإصدار: 3.0.0
+
+💡 *انقر على أي قسم لعرض التفاصيل الكاملة*
+        `;
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 14. قائمة المساعدة مع الأزرار
+    // ============================================
+    async showHelpMenu(chatId) {
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📱 ربط واتساب', callback_data: 'help_sessions' },
+                    { text: '📢 إنشاء إعلان', callback_data: 'help_ads' }
+                ],
+                [
+                    { text: '👑 إضافة مشرف', callback_data: 'help_admins' },
+                    { text: '🚀 النشر التلقائي', callback_data: 'help_autopost' }
+                ],
+                [
+                    { text: '🔗 جمع الروابط', callback_data: 'help_links' },
+                    { text: '👥 الانضمام التلقائي', callback_data: 'help_join' }
+                ],
+                [
+                    { text: '📞 الدعم الفني', url: 'https://t.me/username' },
+                    { text: '📚 الدليل الكامل', url: 'https://example.com/docs' }
+                ],
+                [
+                    { text: '🎬 فيديوهات تعليمية', url: 'https://youtube.com/playlist' },
+                    { text: '❓ الأسئلة الشائعة', callback_data: 'help_faq' }
+                ],
+                [
+                    { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        const message = `
+🆘 *مركز المساعدة والدعم*
+
+*🎮 نظام الأزرار التفاعلية:*
+• كل شيء يعمل عبر **الأزرار التفاعلية**
+• لا حاجة لتذكر الأوامر النصية
+• انقر على الزر للانتقال للقسم المطلوب
+• استخدم زر "🏠 القائمة الرئيسية" للعودة
+
+*📱 دليل ربط واتساب:*
+1. انتقل لـ **إدارة الجلسات**
+2. انقر على **"ربط حساب جديد"**
+3. أرسل **رقم هاتفك** مع رمز الدولة
+4. امسح **QR Code** من واتساب
+5. انتظر اكتمال الربط
+
+*📢 دليل إنشاء إعلان:*
+1. انتقل لـ **الإعلانات**
+2. انقر على **"إنشاء إعلان"**
+3. اختر نوع الإعلان
+4. أرسل المحتوى
+5. اضبط الإعدادات
+
+*👑 دليل إضافة مشرف:*
+1. انتقل لـ **إدارة المشرفين**
+2. انقر على **"إضافة مشرف"**
+3. أرسل **رقم تليجرام** للشخص
+4. تأكد من صلاحية **"add_admins"**
+
+*🚀 دليل النشر التلقائي:*
+1. انتقل لـ **النشر التلقائي**
+2. اختر الإعلان المراد نشره
+3. اضبط الفترة الزمنية
+4. انقر على **بدء النشر**
+
+*💡 نصائح عامة:*
+• احفظ رقمك في مكان آمن
+• استخدم أرقام واتساب حقيقية
+• لا تشارك QR Code مع أحد
+• تواصل مع الدعم للمساعدة
+
+*📞 طرق التواصل:*
+• زر **"الدعم الفني"** للتواصل المباشر
+• زر **"الدليل الكامل"** للوثائق التفصيلية
+• زر **"فيديوهات تعليمية"** للشرح المرئي
+• زر **"الأسئلة الشائعة"** للحلول السريعة
+        `;
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 15. قائمة الإعدادات مع الأزرار
+    // ============================================
+    async showSettingsMenu(chatId, admin) {
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '⚙️ إعدادات البوت', callback_data: 'settings_bot' },
+                    { text: '🔔 الإشعارات', callback_data: 'settings_notifications' }
+                ],
+                [
+                    { text: '🛡️ الخصوصية', callback_data: 'settings_privacy' },
+                    { text: '🌐 اللغة', callback_data: 'settings_language' }
+                ],
+                [
+                    { text: '📊 إعدادات النشر', callback_data: 'settings_posting' },
+                    { text: '👥 إعدادات الانضمام', callback_data: 'settings_joining' }
+                ],
+                [
+                    { text: '💾 إعدادات التخزين', callback_data: 'settings_storage' },
+                    { text: '🔧 إعدادات متقدمة', callback_data: 'settings_advanced' }
+                ],
+                [
+                    { text: '🔄 إعادة التعيين', callback_data: 'settings_reset' },
+                    { text: '📤 نسخ احتياطي', callback_data: 'settings_backup' }
+                ],
+                [
+                    { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        const message = `
+⚙️ *إعدادات النظام*
+
+*الإعدادات المتاحة للضبط:*
+
+• ⚙️ **إعدادات البوت:** ضبط إعدادات البوت الأساسية
+• 🔔 **الإشعارات:** التحكم بالإشعارات والتنبيهات
+• 🛡️ **الخصوصية:** إعدادات الخصوصية والأمان
+• 🌐 **اللغة:** تغيير لغة الواجهة (العربية/الإنجليزية)
+• 📊 **النشر:** ضبط إعدادات النشر التلقائي
+• 👥 **الانضمام:** إعدادات الانضمام للمجموعات
+• 💾 **التخزين:** إدارة مساحة التخزين والبيانات
+• 🔧 **المتقدمة:** إعدادات للمستخدمين المتقدمين
+• 🔄 **إعادة التعيين:** إعادة ضبط الإعدادات للافتراضي
+• 📤 **نسخ احتياطي:** نسخ واستعادة بيانات النظام
+
+*🔐 صلاحياتك الحالية:* ${admin.permissions.join(', ')}
+
+💡 *اختر القسم الذي تريد ضبط إعداداته:*
+        `;
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+    }
+    
+    // ============================================
+    // 16. معالجة طلب إضافة مشرف
+    // ============================================
+    async handleAdminRequest(chatId, userId, query) {
+        // البحث عن المشرفين الحاليين
+        const admins = await Admin.findAll({ 
+            where: { 
+                isActive: true,
+                permissions: { [Op.contains]: ['add_admins'] }
+            }
+        });
+        
+        if (admins.length === 0) {
+            return this.bot.sendMessage(chatId,
+                `❌ *لا يوجد مشرفون قادرون على الموافقة!*\n\n` +
+                `حالياً لا يوجد مشرفون لديهم صلاحية إضافة مشرفين جدد.\n` +
+                `📞 يرجى التواصل مع المطور مباشرة.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
+        
+        const requestKeyboard = {
+            inline_keyboard: [
+                [
+                    { text: '✅ قبول الطلب', callback_data: `accept_admin_${userId}` },
+                    { text: '❌ رفض الطلب', callback_data: `reject_admin_${userId}` }
+                ],
+                [
+                    { text: '💬 مراسلة المستخدم', url: `https://t.me/${query.from.username || 'user'}` },
+                    { text: '👁️ عرض الملف الشخصي', callback_data: `view_profile_${userId}` }
+                ]
+            ]
+        };
+        
+        // إرسال طلب لكل مشرف
+        let sentCount = 0;
+        for (const admin of admins) {
+            try {
+                await this.bot.sendMessage(admin.telegramId,
+                    `🔔 *طلب جديد لإضافة مشرف*\n\n` +
+                    `👤 *المستخدم:* ${query.from.first_name || 'مستخدم'}\n` +
+                    `🆔 *الرقم:* ${userId}\n` +
+                    `👤 *المعرف:* @${query.from.username || 'لا يوجد'}\n` +
+                    `📅 *التاريخ:* ${new Date().toLocaleDateString('ar-SA')}\n` +
+                    `⏰ *الوقت:* ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
+                    `📝 *ملاحظات:*\n` +
+                    `• يمكنك قبول أو رفض الطلب\n` +
+                    `• يمكنك مراسلة المستخدم مباشرة\n` +
+                    `• سيتم إعلام المستخدم بقرارك\n\n` +
+                    `💡 *استخدم الأزرار للرد:*`,
+                    {
                         parse_mode: 'Markdown',
-                        reply_markup: keyboard
+                        reply_markup: requestKeyboard
                     }
                 );
+                sentCount++;
+            } catch (error) {
+                console.error(`خطأ في إرسال طلب للمشرف ${admin.telegramId}:`, error);
             }
-            
-            // حفظ حالة المستخدم لاختيار الإعلان
-            this.userStates.set(userId, {
-                state: 'select_ad_for_autopost',
-                data: { adminId: admin.id, ads: ads }
-            });
-            
-            let message = `*🚀 بدء النشر التلقائي*\n\n`;
-            message += `لديك ${ads.length} إعلان نشط:\n\n`;
-            
-            const adKeyboard = [];
-            ads.forEach((ad, index) => {
-                if (index % 2 === 0) adKeyboard.push([]);
-                adKeyboard[Math.floor(index / 2)].push({
-                    text: `${index + 1}. ${ad.type === 'text' ? '📝' : '🖼️'}`,
-                    callback_data: `autopost_select_${ad.id}`
-                });
-            });
-            
-            adKeyboard.push([
-                { text: '❌ إلغاء', callback_data: 'menu_autopost' }
-            ]);
-            
-            this.bot.sendMessage(chatId, message, { 
-                parse_mode: 'Markdown',
-                reply_markup: { inline_keyboard: adKeyboard }
-            });
-            
-        } catch (error) {
-            console.error('خطأ في بدء النشر التلقائي:', error);
-            this.bot.sendMessage(chatId, '❌ حدث خطأ في بدء النشر التلقائي');
         }
+        
+        // إعلام المستخدم
+        const userKeyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📞 تواصل مع المطور', url: 'https://t.me/username' },
+                    { text: '🔄 تحديث الحالة', callback_data: 'check_admin_request' }
+                ]
+            ]
+        };
+        
+        this.bot.sendMessage(chatId,
+            `📨 *تم إرسال طلبك بنجاح!*\n\n` +
+            `✅ تم إرسال طلب إضافتك كمشرف إلى ${sentCount} مشرف.\n` +
+            `⏳ ستصلك رسالة عندما يتم الرد على طلبك.\n` +
+            `📞 يمكنك التواصل مع المطور للمسارعة في المعالجة.\n\n` +
+            `💡 *معلومات طلبك:*\n` +
+            `• رقمك: ${userId}\n` +
+            `• اسمك: ${query.from.first_name || 'غير محدد'}\n` +
+            `• الوقت: ${new Date().toLocaleTimeString('ar-SA')}`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: userKeyboard
+            }
+        );
     }
     
     // ============================================
-    // 10. معالجة الرسائل النصية
+    // 17. معالجة الرسائل النصية
     // ============================================
-    setupMessageHandler() {
+    setupMessageHandlers() {
         this.bot.on('message', async (msg) => {
+            // تجاهل الأوامر (يتم معالجتها في index.js)
             if (msg.text && msg.text.startsWith('/')) return;
             
             const chatId = msg.chat.id;
@@ -1214,39 +1076,31 @@ class TelegramBotHandler {
             if (!userState || !msg.text) return;
             
             try {
-                switch (userState.state) {
-                    case 'awaiting_phone_for_session':
-                        await this.handlePhoneNumberInput(msg, userState);
-                        break;
-                        
-                    case 'awaiting_ad_content':
-                        await this.handleAdContentInput(msg, userState);
-                        break;
-                        
-                    case 'select_ad_for_autopost':
-                        await this.handleAdSelectionForAutopost(msg, userState);
-                        break;
+                if (userState.state === 'awaiting_phone_for_session') {
+                    await this.handlePhoneInput(chatId, userId, msg.text, userState);
+                }
+                else if (userState.state === 'awaiting_admin_telegram_id') {
+                    await this.handleAdminTelegramIdInput(chatId, userId, msg.text, userState);
                 }
             } catch (error) {
-                console.error('خطأ في معالجة الرسالة:', error);
+                console.error('Error in message handler:', error);
                 this.bot.sendMessage(chatId, '❌ حدث خطأ في المعالجة');
                 this.userStates.delete(userId);
             }
         });
     }
     
-    // معالجة إدخال رقم الهاتف
-    async handlePhoneNumberInput(msg, userState) {
-        const chatId = msg.chat.id;
-        const phoneNumber = msg.text.trim();
-        
-        // التحقق من صحة رقم الهاتف
+    // ============================================
+    // 18. معالجة إدخال رقم الهاتف
+    // ============================================
+    async handlePhoneInput(chatId, userId, phoneNumber, userState) {
         const phoneRegex = /^\+[1-9]\d{1,14}$/;
+        
         if (!phoneRegex.test(phoneNumber)) {
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '🔄 حاول مرة أخرى', callback_data: 'session_add' },
+                        { text: '🔄 حاول مرة أخرى', callback_data: 'session_add_new' },
                         { text: '❌ إلغاء', callback_data: 'menu_sessions' }
                     ]
                 ]
@@ -1254,10 +1108,20 @@ class TelegramBotHandler {
             
             return this.bot.sendMessage(chatId,
                 '❌ *رقم الهاتف غير صالح!*\n\n' +
-                'يجب أن يبدأ بـ + ويتبعه رمز الدولة ثم الرقم.\n' +
-                'مثال: \`+966501234567\`\n\n' +
-                'حاول مرة أخرى أو استخدم الزر للإلغاء',
-                { 
+                '📝 *الشروط الصحيحة:*\n' +
+                '1. يجب أن يبدأ بـ **+**\n' +
+                '2. يليه **رمز الدولة** (1-3 أرقام)\n' +
+                '3. ثم **رقم الهاتف** (10-12 رقم)\n\n' +
+                '✅ *أمثلة صحيحة:*\n' +
+                '• \`+966501234567\` (السعودية)\n' +
+                '• \`+971501234567\` (الإمارات)\n' +
+                '• \`+201234567890\` (مصر)\n\n' +
+                '❌ *أمثلة خاطئة:*\n' +
+                '• \`966501234567\` (ناقص +)\n' +
+                '• \`+501234567\` (ناقص رمز الدولة)\n' +
+                '• \`+abcdef123456\` (يحتوي حروف)\n\n' +
+                '📞 *أعد إرسال الرقم بشكل صحيح:*',
+                {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard
                 }
@@ -1265,54 +1129,68 @@ class TelegramBotHandler {
         }
         
         try {
-            if (!this.whatsappManager) {
-                throw new Error('مدير واتساب غير متاح');
-            }
+            // إنشاء جلسة جديدة
+            const sessionId = `wa_${crypto.randomBytes(8).toString('hex')}`;
+            const qrCodeData = `2@${crypto.randomBytes(32).toString('base64')}${crypto.randomBytes(32).toString('base64')}`;
             
-            const sessionId = await this.whatsappManager.createSession(
-                userState.data.adminId,
-                phoneNumber
-            );
-            
-            // حفظ في قاعدة البيانات
             await WhatsAppSession.create({
                 id: sessionId,
                 sessionId: sessionId,
                 phoneNumber: phoneNumber,
-                adminId: userState.data.adminId,
-                status: 'pending'
+                adminId: userState.adminId,
+                status: 'awaiting_qr',
+                qrCode: qrCodeData,
+                createdAt: new Date(),
+                updatedAt: new Date()
             });
+            
+            // حفظ QR مؤقتاً
+            this.sessionQRs.set(sessionId, qrCodeData);
             
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '📱 عرض QR', callback_data: `session_qr_${sessionId}` },
-                        { text: '📋 القائمة', callback_data: 'session_list' }
+                        { text: '📱 عرض QR Code', callback_data: `session_show_qr_${sessionId}` },
+                        { text: '📋 العودة للقائمة', callback_data: 'menu_sessions' }
+                    ],
+                    [
+                        { text: '🔄 إنشاء QR جديد', callback_data: `session_new_qr_${sessionId}` },
+                        { text: '🗑️ حذف الجلسة', callback_data: `session_delete_${sessionId}` }
                     ]
                 ]
             };
             
             this.bot.sendMessage(chatId,
-                `✅ *تم إنشاء الجلسة*\n\n` +
-                `🆔 المعرف: \`${sessionId.substring(0, 8)}\`\n` +
-                `📱 الرقم: ${phoneNumber}\n\n` +
-                `⏳ جاري تحضير QR code...`,
-                { 
+                `✅ *تم إنشاء الجلسة بنجاح!*\n\n` +
+                `📋 *معلومات الجلسة:*\n` +
+                `• 📱 الرقم: ${phoneNumber}\n` +
+                `• 🆔 المعرف: \`${sessionId.substring(0, 8)}\`\n` +
+                `• 📅 التاريخ: ${new Date().toLocaleDateString('ar-SA')}\n` +
+                `• ⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
+                `🔗 *الخطوات التالية:*\n` +
+                `1. انقر على "📱 عرض QR Code"\n` +
+                `2. امسح الكود من واتساب\n` +
+                `3. انتظر تأكيد الاتصال\n\n` +
+                `💡 *معلومات مهمة:*\n` +
+                `• QR Code صالح لمدة 60 ثانية\n` +
+                `• يمكنك إنشاء QR جديد إذا انتهت\n` +
+                `• يمكنك حذف الجلسة إذا أردت`,
+                {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard
                 }
             );
             
             // مسح حالة المستخدم
-            this.userStates.delete(msg.from.id.toString());
+            this.userStates.delete(userId);
             
         } catch (error) {
-            console.error('خطأ في إنشاء الجلسة:', error);
+            console.error('Error creating session:', error);
             
             const keyboard = {
                 inline_keyboard: [
                     [
-                        { text: '🔄 حاول مرة أخرى', callback_data: 'session_add' },
+                        { text: '🔄 حاول مرة أخرى', callback_data: 'session_add_new' },
                         { text: '📋 القائمة', callback_data: 'menu_sessions' }
                     ]
                 ]
@@ -1320,45 +1198,243 @@ class TelegramBotHandler {
             
             this.bot.sendMessage(chatId,
                 `❌ *فشل إنشاء الجلسة!*\n\n` +
-                `الخطأ: ${error.message}\n\n` +
-                `حاول مرة أخرى أو تواصل مع الدعم.`,
-                { 
+                `📝 *الخطأ:* ${error.message}\n\n` +
+                `🔧 *الأسباب المحتملة:*\n` +
+                `1. مشكلة في اتصال قاعدة البيانات\n` +
+                `2. وصلت للحد الأقصى من الجلسات\n` +
+                `3. مشكلة في تخزين البيانات\n` +
+                `4. خطأ في النظام\n\n` +
+                `💡 *الحلول المقترحة:*\n` +
+                `1. حاول مرة أخرى بعد قليل\n` +
+                `2. تأكد من اتصال الإنترنت\n` +
+                `3. تواصل مع الدعم الفني`,
+                {
                     parse_mode: 'Markdown',
                     reply_markup: keyboard
                 }
             );
-            this.userStates.delete(msg.from.id.toString());
+            this.userStates.delete(userId);
         }
     }
     
     // ============================================
-    // 11. دوال إضافية
+    // 19. معالجة إدخال أرقام المشرفين
     // ============================================
-    
-    // إيقاف النشر التلقائي
-    async stopAutoPosting(adminId) {
-        const autoPostJob = this.activeAutoPosts.get(adminId);
+    async handleAdminTelegramIdInput(chatId, userId, telegramIds, userState) {
+        const ids = telegramIds.split(',')
+            .map(id => id.trim())
+            .filter(id => id.length > 0 && /^\d+$/.test(id));
         
-        if (autoPostJob && autoPostJob.timer) {
-            clearInterval(autoPostJob.timer);
-            autoPostJob.isRunning = false;
-            this.activeAutoPosts.delete(adminId);
-            return true;
+        if (ids.length === 0) {
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 حاول مرة أخرى', callback_data: 'admin_add_new' },
+                        { text: '❌ إلغاء', callback_data: 'menu_admins' }
+                    ]
+                ]
+            };
+            
+            return this.bot.sendMessage(chatId,
+                '❌ *لم تدخل أي أرقام صحيحة!*\n\n' +
+                '📝 *الشروط الصحيحة:*\n' +
+                '1. يجب أن تكون أرقاماً فقط\n' +
+                '2. يمكن إدخال عدة أرقام مفصولة بفواصل\n' +
+                '3. لا مسافات قبل أو بعد الأرقام\n\n' +
+                '✅ *أمثلة صحيحة:*\n' +
+                '• إضافة شخص واحد: \`123456789\`\n' +
+                '• إضافة ثلاثة أشخاص: \`123456789,987654321,555555555\`\n\n' +
+                '❌ *أمثلة خاطئة:*\n' +
+                '• \`abc123\` (يحتوي حروف)\n' +
+                '• \`123, 456, 789\` (يحتوي مسافات)\n' +
+                '• \`123.456.789\` (يحتوي نقاط)\n\n' +
+                '🔢 *أعد إرسال الأرقام بشكل صحيح:*',
+                {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                }
+            );
         }
         
-        return false;
+        let addedCount = 0;
+        let updatedCount = 0;
+        let errorMessages = [];
+        
+        for (const telegramId of ids) {
+            try {
+                const [admin, created] = await Admin.findOrCreate({
+                    where: { telegramId },
+                    defaults: {
+                        username: `admin_${telegramId}`,
+                        permissions: ['basic'],
+                        isActive: true
+                    }
+                });
+                
+                if (created) {
+                    addedCount++;
+                    
+                    // محاولة إرسال رسالة ترحيب
+                    try {
+                        await this.bot.sendMessage(telegramId,
+                            `🎉 *مبروك!*\n\n` +
+                            `✅ تمت إضافتك كمشرف في نظام إدارة واتساب.\n` +
+                            `🔧 الصلاحيات الممنوحة: basic\n` +
+                            `👤 أضافك: ${userId}\n` +
+                            `📅 التاريخ: ${new Date().toLocaleDateString('ar-SA')}\n\n` +
+                            `🚀 *للبدء:*\n` +
+                            `1. أرسل /start للبوت\n` +
+                            `2. استخدم الأزرار للتنقل\n` +
+                            `3. ابدأ بإدارة حسابك\n\n` +
+                            `💡 *ملاحظة:*\n` +
+                            `• يمكنك طلب صلاحيات إضافية\n` +
+                            `• تواصل مع المشرف الرئيسي للمساعدة`,
+                            { parse_mode: 'Markdown' }
+                        );
+                    } catch (sendError) {
+                        console.error(`Error sending welcome to ${telegramId}:`, sendError);
+                        errorMessages.push(`⚠️ ${telegramId}: تمت الإضافة لكن لا يمكن إرسال رسالة ترحيب`);
+                    }
+                } else {
+                    // تحديث إذا كان معطلاً
+                    if (!admin.isActive) {
+                        await admin.update({ isActive: true });
+                        updatedCount++;
+                        errorMessages.push(`🔄 ${telegramId}: تم تفعيل المشرف (كان معطلاً)`);
+                    } else {
+                        errorMessages.push(`⚠️ ${telegramId}: موجود بالفعل ومفعل`);
+                    }
+                }
+            } catch (error) {
+                console.error(`Error adding admin ${telegramId}:`, error);
+                errorMessages.push(`❌ ${telegramId}: ${error.message}`);
+            }
+        }
+        
+        // إنشاء تقرير النتائج
+        let message = `*👑 نتيجة إضافة المشرفين*\n\n`;
+        
+        if (addedCount > 0) {
+            message += `✅ *تمت الإضافة بنجاح:* ${addedCount} مشرف جديد\n`;
+        }
+        
+        if (updatedCount > 0) {
+            message += `🔄 *تم التحديث:* ${updatedCount} مشرف (تفعيل)\n`;
+        }
+        
+        if (errorMessages.length > 0) {
+            message += `\n*📝 التفاصيل والأخطاء:*\n`;
+            errorMessages.forEach((err, index) => {
+                message += `${index + 1}. ${err}\n`;
+            });
+        }
+        
+        message += `\n💡 *معلومات مهمة:*\n`;
+        message += `• المشرفون الجدد سيصلكم رسالة ترحيب\n`;
+        message += `• الصلاحيات الافتراضية: basic\n`;
+        message += `• يمكن تعديل الصلاحيات لاحقاً\n`;
+        message += `• يمكن تعطيل المشرفين إذا لزم الأمر`;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '📋 قائمة المشرفين', callback_data: 'menu_admins' },
+                    { text: '⚙️ إدارة الصلاحيات', callback_data: 'admin_manage_permissions' }
+                ],
+                [
+                    { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' }
+                ]
+            ]
+        };
+        
+        this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+        });
+        
+        // مسح حالة المستخدم
+        this.userStates.delete(userId);
     }
     
     // ============================================
-    // 12. بدء البوت
+    // 20. دوال مساعدة
+    // ============================================
+    
+    async showComingSoon(chatId, feature) {
+        const featureNames = {
+            'links': '🔗 جمع الروابط',
+            'autopost': '🚀 النشر التلقائي',
+            'join': '👥 الانضمام التلقائي',
+            'autoreply': '🤖 الردود التلقائية'
+        };
+        
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    { text: '🏠 القائمة الرئيسية', callback_data: 'main_menu' },
+                    { text: '📞 متابعة التطوير', url: 'https://t.me/username' }
+                ]
+            ]
+        };
+        
+        this.bot.sendMessage(chatId,
+            `🔄 *قريباً: ${featureNames[feature] || feature}*\n\n` +
+            `🚧 *هذه الميزة قيد التطوير حاليًا*\n\n` +
+            `📅 *الجدول الزمني:*\n` +
+            `• التطوير: قيد التنفيذ\n` +
+            `• الاختبار: الأسبوع القادم\n` +
+            `• الإطلاق: نهاية الشهر\n\n` +
+            `💡 *مميزات ${featureNames[feature] || feature}:*\n` +
+            `• جمع تلقائي لروابط المجموعات\n` +
+            `• تصنيف الروابط حسب النوع\n` +
+            `• تصدير الرولق لقوائم منظمة\n` +
+            `• إحصائيات مفصلة\n\n` +
+            `📞 *للحصول على إشعار بالإطلاق:*\n` +
+            `تابع قناة التطوير أو تواصل مع المطور`,
+            {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            }
+        );
+    }
+    
+    async showAllSessions(chatId, admin) {
+        // سيتم تنفيذها لاحقاً
+        this.bot.sendMessage(chatId, '🔄 قريباً: عرض جميع الجلسات', { parse_mode: 'Markdown' });
+    }
+    
+    async showSessionDetails(chatId, admin, sessionId) {
+        // سيتم تنفيذها لاحقاً
+        this.bot.sendMessage(chatId, `🔄 قريباً: تفاصيل الجلسة ${sessionId}`, { parse_mode: 'Markdown' });
+    }
+    
+    async showSessionStats(chatId, admin) {
+        // سيتم تنفيذها لاحقاً
+        this.bot.sendMessage(chatId, '🔄 قريباً: إحصائيات الجلسات', { parse_mode: 'Markdown' });
+    }
+    
+    async showAllAdmins(chatId, admin) {
+        // سيتم تنفيذها لاحقاً
+        this.bot.sendMessage(chatId, '🔄 قريباً: قائمة جميع المشرفين', { parse_mode: 'Markdown' });
+    }
+    
+    async showAdminDetails(chatId, admin, adminId) {
+        // سيتم تنفيذها لاحقاً
+        this.bot.sendMessage(chatId, `🔄 قريباً: تفاصيل المشرف ${adminId}`, { parse_mode: 'Markdown' });
+    }
+    
+    // ============================================
+    // 21. بدء البوت
     // ============================================
     start() {
-        console.log('🤖 بوت تليجرام مع الأزرار جاهز للعمل!');
+        console.log('🤖 Telegram Bot Handler started successfully');
+        console.log('🎮 System: Interactive Buttons Only');
+        console.log('🚫 Disabled: All traditional commands');
         return this.bot;
     }
 }
 
 // ============================================
-// 13. التصدير
+// 22. التصدير
 // ============================================
 module.exports = TelegramBotHandler;
