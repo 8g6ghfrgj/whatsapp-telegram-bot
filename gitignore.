@@ -1,0 +1,284 @@
+# ============================================
+# ملف .gitignore لمشروع WhatsApp-Telegram Bot
+# ============================================
+
+# 1. بيانات الاعتماد والبيانات السرية
+# ============================================
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.example
+!.env.example  # نستثني ملف المثال
+
+# المفاتيح والرموز السرية
+*.key
+*.pem
+*.crt
+*.cert
+*.pub
+*.secret
+
+# بيانات الجلسات
+sessions/
+*.session
+*.session.*
+whatsapp-session-*
+WA_*/
+.wwebjs_auth/
+
+# قاعدة البيانات المحلية
+*.db
+*.sqlite
+*.sqlite3
+database/*.db
+database/*.sqlite
+
+# 2. ملفات النظام والمحرر
+# ============================================
+# نظام التشغيل
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# محررات الكود
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.bak
+*.tmp
+
+# VS Code
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+.vscode/extensions.json
+
+# 3. تبعيات Node.js
+# ============================================
+# تبعيات npm
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.yarn/
+.yarnrc
+
+# تبعيات Puppeteer
+.cache/
+.puppeteer/
+.local-chromium/
+
+# 4. الملفات المنشأة
+# ============================================
+# اللوغات
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# الملفات المؤقتة
+tmp/
+temp/
+*.tmp
+*.temp
+.tmp/
+
+# التحميلات
+uploads/
+downloads/
+media/
+files/
+
+# 5. ملفات البناء والتوزيع
+# ============================================
+# التجميع
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+
+# التغطية
+coverage/
+.nyc_output/
+
+# 6. ملفات Render والاستضافة
+# ============================================
+# Render
+.render/
+render-*.yaml
+!render.yaml  # نستثني الملف الرئيسي
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
+
+# 7. ملفات WhatsApp
+# ============================================
+# بيانات WhatsApp
+.whatsapp/
+.wwebjs_cache/
+.wwebjs_db/
+.wwebjs_auth/
+
+# صور وملفات QR
+*.qr.png
+*.qr.jpg
+qr-*.png
+qr_code_*.png
+
+# جلسات المستخدم
+user-sessions/
+user_data/
+profile_pics/
+
+# 8. ملفات مشروع معينة
+# ============================================
+# محتوى محدد للبوت
+config.local.js
+config.production.js
+keys/
+secrets/
+
+# ملفات النسخ الاحتياطي
+*.backup
+backup/
+backups/
+*.old
+*.prev
+
+# 9. ملفات قاعدة البيانات
+# ============================================
+# PostgreSQL
+*.pid
+*.socket
+
+# SQLite
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 10. ملفات وسائط
+# ============================================
+# الصور
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+
+# الفيديوهات
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# المستندات
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+
+# التسجيلات الصوتية
+*.mp3
+*.wav
+*.ogg
+
+# 11. نظام إدارة الجلسات
+# ============================================
+# جلسات واتساب
+whatsapp-sessions/
+session-backups/
+*.session.json
+*.session.backup
+
+# بيانات المشرفين
+admin-sessions/
+user-tokens/
+
+# 12. ملفات التثبيت
+# ============================================
+# تثبيت Chromium
+.chromium/
+chromium/
+
+# تثبيت Puppeteer
+.puppeteerrc
+puppeteer-*.js
+
+# 13. ملفات تطوير إضافية
+# ============================================
+# الاختبارات
+test-results/
+test-reports/
+
+# التوثيق
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# 14. استثناءات مخصصة لمشروعك
+# ============================================
+# استثناء الملفات المهمة التي تحتاجها
+!package.json
+!package-lock.json
+!README.md
+!LICENSE
+!index.js
+!src/
+!scripts/
+!config/
+
+# ولكن استثناء الملفات داخل src التي يجب تجاهلها
+src/**/*.test.js
+src/**/*.spec.js
+src/**/*.tmp.js
+
+# 15. قوائم الحظر/السماح
+# ============================================
+# قوائم الحظر
+blacklist.txt
+blocklist.txt
+
+# قوائم السماح
+whitelist.txt
+allowlist.txt
+
+# 16. ملفات النسخ الاحتياطي التلقائي
+# ============================================
+# نسخ احتياطي تلقائي
+auto-backup/
+backup-auto/
+*.auto-backup
+*.backup-auto
+
+# 17. ملفات الإحصائيات
+# ============================================
+# إحصائيات البوت
+stats/
+statistics/
+analytics/
+*.stats.json
+*.analytics.json
+
+# 18. ملفات التهيئة المحددة للمستخدم
+# ============================================
+# إعدادات مخصصة
+config.user.js
+settings.user.json
+preferences.local.json
