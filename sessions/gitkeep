@@ -1,0 +1,8 @@
+# 1. أنشئ مجلد sessions
+mkdir sessions
+
+# 2. أنشئ ملف .gitkeep داخل المجلد
+touch sessions/.gitkeep
+
+# 3. تحقق من إنشاء المجلد
+ls -la sessions/
