@@ -225,7 +225,7 @@ app.post('/webhook/qr', (req, res) => {
 console.log('🚀 بدء تشغيل WhatsApp Bot المتقدم...');
 
 let sequelize;
-if (process.env.DATABASE_URL && process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production') {
     // PostgreSQL للـ Render
     sequelize = new Sequelize(process.env.DATABASE_URL, {
         dialect: 'postgres',
@@ -242,16 +242,6 @@ if (process.env.DATABASE_URL && process.env.NODE_ENV === 'production') {
                 rejectUnauthorized: false
             }
         }
-    });
-} else {
-    // SQLite للتطوير المحلي أو إذا ما في DATABASE_URL
-    console.log('⚠️  استخدام SQLite (محلي)');
-    sequelize = new Sequelize({
-        dialect: 'sqlite',
-        storage: './database/bot.db',
-        logging: false
-    });
-}
     });
 } else {
     // SQLite للتطوير المحلي
