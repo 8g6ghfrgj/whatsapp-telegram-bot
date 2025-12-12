@@ -1,16 +1,48 @@
 version: '3.8'
 
 services:
-  bot:
+  whatsapp-telegram-bot:
     build: .
-    container_name: whatsapp-bot
+    container_name: whatsapp-telegram-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
+      - PORT=3000
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_ADMIN_IDS=${TELEGRAM_ADMIN_IDS}
+      - DATABASE_URL=${DATABASE_URL}
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
     volumes:
       - ./sessions:/app/sessions
       - ./database:/app/database
-    ports:
-      - "3000:3000"
-    restart: unless-stopped
+      - ./logs:/app/logs
+      - ./temp:/app/temp
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - bot-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  bot-network:
+    driver: bridge
