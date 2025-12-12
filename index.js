@@ -1,7 +1,7 @@
 // ============================================
 // الملف الرئيسي: WhatsApp-Telegram Bot النسخة الشاملة
 // مصمم خصيصاً للعمل على Render.com
-// النسخة: 2.0.0 - Optimized for Render
+// النسخة: 2.1.0 - Fixed & Optimized
 // ============================================
 
 require('dotenv').config();
@@ -159,7 +159,7 @@ app.get('/', (req, res) => {
                     
                     <div class="stat-box">
                         <span>🔧 النسخة</span>
-                        <span class="stat-value">2.0.0</span>
+                        <span class="stat-value">2.1.0</span>
                     </div>
                 </div>
                 
@@ -189,7 +189,7 @@ app.get('/health', (req, res) => {
         memory: process.memoryUsage(),
         platform: process.platform,
         nodeVersion: process.version,
-        botVersion: '2.0.0'
+        botVersion: '2.1.0'
     });
 });
 
@@ -197,13 +197,13 @@ app.get('/health', (req, res) => {
 app.get('/status', async (req, res) => {
     try {
         const stats = {
-            whatsappSessions: whatsappClients.size,
-            activeAutoPosts: activeAutoPosts.size,
-            activeAutoJoins: activeAutoJoins.size,
-            userStates: userStates.size,
+            whatsappSessions: global.whatsappClients ? global.whatsappClients.size : 0,
+            activeAutoPosts: global.activeAutoPosts ? global.activeAutoPosts.size : 0,
+            activeAutoJoins: global.activeAutoJoins ? global.activeAutoJoins.size : 0,
+            userStates: global.userStates ? global.userStates.size : 0,
             uptime: process.uptime(),
             memory: process.memoryUsage(),
-            database: dbInitialized
+            database: global.dbInitialized || false
         };
         
         res.json(stats);
@@ -872,7 +872,7 @@ const Broadcast = sequelize.define('Broadcast', {
 // 3. مكتبات إضافية - Render Compatible
 // ============================================
 const TelegramBot = require('node-telegram-bot-api');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client: WhatsAppClient, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const cron = require('node-cron');
 const axios = require('axios');
@@ -880,35 +880,17 @@ const axios = require('axios');
 // ============================================
 // 4. المتغيرات العامة والذاكرة
 // ============================================
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {
-    polling: {
-        interval: 1000,
-        autoStart: true,
-        params: {
-            timeout: 30,
-            maxRetries: 3
-        }
-    },
-    request: {
-        timeout: 60000,
-        agentOptions: {
-            keepAlive: true,
-            keepAliveMsecs: 10000
-        }
-    }
-});
-
 // تخزين الجلسات النشطة
-const whatsappClients = new Map();
-const userStates = new Map();
-const activeAutoPosts = new Map();
-const activeAutoJoins = new Map();
-const sessionQRs = new Map();
-const messageQueues = new Map();
-const cooldownTimers = new Map();
+global.whatsappClients = new Map();
+global.userStates = new Map();
+global.activeAutoPosts = new Map();
+global.activeAutoJoins = new Map();
+global.sessionQRs = new Map();
+global.messageQueues = new Map();
+global.cooldownTimers = new Map();
 
 // حالة قاعدة البيانات
-let dbInitialized = false;
+global.dbInitialized = false;
 
 // ============================================
 // 5. دوال المساعدة المتقدمة
@@ -964,11 +946,8 @@ async function initializeDatabase() {
             }
         }
         
-        dbInitialized = true;
+        global.dbInitialized = true;
         console.log('🎉 تم تهيئة قاعدة البيانات بنجاح');
-        
-        // تشغيل مهام الصيانة
-        startMaintenanceTasks();
         
         return true;
     } catch (error) {
@@ -999,14 +978,14 @@ async function createWhatsAppSession(phoneNumber, adminId, chatId) {
             metadata: {
                 createdFrom: 'telegram_bot',
                 platform: 'render',
-                userAgent: 'WhatsApp-Bot/2.0.0'
+                userAgent: 'WhatsApp-Bot/2.1.0'
             }
         });
         
         console.log(`✅ تم حفظ الجلسة في قاعدة البيانات: ${sessionId}`);
         
         // إعداد عميل واتساب مع LocalAuth
-        const client = new Client({
+        const client = new WhatsAppClient({
             authStrategy: new LocalAuth({
                 clientId: sessionId,
                 dataPath: './sessions'
@@ -1036,14 +1015,14 @@ async function createWhatsAppSession(phoneNumber, adminId, chatId) {
         });
         
         // تخزين العميل في الذاكرة
-        whatsappClients.set(sessionId, client);
+        global.whatsappClients.set(sessionId, client);
         
         // معالج QR Code
         client.on('qr', async (qr) => {
             console.log(`📱 تم توليد QR Code للجلسة: ${sessionId}`);
             
             // حفظ QR في الذاكرة
-            sessionQRs.set(sessionId, {
+            global.sessionQRs.set(sessionId, {
                 qr: qr,
                 timestamp: Date.now(),
                 phoneNumber: phoneNumber
@@ -1080,25 +1059,28 @@ async function createWhatsAppSession(phoneNumber, adminId, chatId) {
             });
             
             // مسح QR من الذاكرة
-            sessionQRs.delete(sessionId);
+            global.sessionQRs.delete(sessionId);
             
             // إرسال إشعار الاتصال الناجح
-            await bot.sendMessage(chatId,
-                `🎉 *تم الربط بنجاح!*\n\n` +
-                `✅ *حساب WhatsApp متصل الآن*\n` +
-                `📱 الرقم: ${phoneNumber}\n` +
-                `👤 الاسم: ${connectionData.pushname || 'غير معروف'}\n` +
-                `🆔 المعرف: ${sessionId.substring(0, 8)}\n` +
-                `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
-                `🚀 *المميزات المتاحة الآن:*\n` +
-                `• 📨 إرسال واستقبال الرسائل\n` +
-                `• 🔗 تجميع الروابط تلقائياً\n` +
-                `• 📢 النشر في المجموعات\n` +
-                `• 🤖 الردود التلقائية\n` +
-                `• 📊 إحصائيات مفصلة\n\n` +
-                `استخدم /sessions لعرض جميع جلساتك`,
-                { parse_mode: 'Markdown' }
-            );
+            const telegramBot = global.telegramBot;
+            if (telegramBot) {
+                await telegramBot.sendMessage(chatId,
+                    `🎉 *تم الربط بنجاح!*\n\n` +
+                    `✅ *حساب WhatsApp متصل الآن*\n` +
+                    `📱 الرقم: ${phoneNumber}\n` +
+                    `👤 الاسم: ${connectionData.pushname || 'غير معروف'}\n` +
+                    `🆔 المعرف: ${sessionId.substring(0, 8)}\n` +
+                    `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
+                    `🚀 *المميزات المتاحة الآن:*\n` +
+                    `• 📨 إرسال واستقبال الرسائل\n` +
+                    `• 🔗 تجميع الروابط تلقائياً\n` +
+                    `• 📢 النشر في المجموعات\n` +
+                    `• 🤖 الردود التلقائية\n` +
+                    `• 📊 إحصائيات مفصلة\n\n` +
+                    `استخدم /sessions لعرض جميع جلساتك`,
+                    { parse_mode: 'Markdown' }
+                );
+            }
             
             // بدء تجميع المجموعات
             setTimeout(() => collectGroupsAndContacts(client, sessionId), 3000);
@@ -1131,14 +1113,17 @@ async function createWhatsAppSession(phoneNumber, adminId, chatId) {
             // إعلام المشرف
             const admin = await Admin.findByPk(adminId);
             if (admin && admin.settings?.notificationEnabled) {
-                await bot.sendMessage(admin.telegramId,
-                    `⚠️ *تم فقدان الاتصال*\n\n` +
-                    `📱 الرقم: ${phoneNumber}\n` +
-                    `📌 السبب: ${reason}\n` +
-                    `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
-                    `استخدم /sessions لعرض الحالة وإعادة المحاولة.`,
-                    { parse_mode: 'Markdown' }
-                );
+                const telegramBot = global.telegramBot;
+                if (telegramBot) {
+                    await telegramBot.sendMessage(admin.telegramId,
+                        `⚠️ *تم فقدان الاتصال*\n\n` +
+                        `📱 الرقم: ${phoneNumber}\n` +
+                        `📌 السبب: ${reason}\n` +
+                        `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
+                        `استخدم /sessions لعرض الحالة وإعادة المحاولة.`,
+                        { parse_mode: 'Markdown' }
+                    );
+                }
             }
         });
         
@@ -1236,11 +1221,14 @@ ${qrText}
         };
         
         // إرسال الرسالة
-        await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
-        });
+        const telegramBot = global.telegramBot;
+        if (telegramBot) {
+            await telegramBot.sendMessage(chatId, message, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard,
+                disable_web_page_preview: true
+            });
+        }
         
         console.log(`✅ تم إرسال QR Code بنجاح إلى ${adminId}`);
         
@@ -1248,13 +1236,16 @@ ${qrText}
         console.error('❌ خطأ في إرسال QR Code:', error);
         
         // إرسال رسالة بديلة
-        await bot.sendMessage(chatId,
-            `❌ *عذراً، حدث خطأ في توليد QR Code*\n\n` +
-            `🔗 *الرابط البديل:*\n` +
-            `\`${qr}\`\n\n` +
-            `انسخ هذا الرابط والصقه في متصفح لرؤية QR Code.`,
-            { parse_mode: 'Markdown' }
-        );
+        const telegramBot = global.telegramBot;
+        if (telegramBot) {
+            await telegramBot.sendMessage(chatId,
+                `❌ *عذراً، حدث خطأ في توليد QR Code*\n\n` +
+                `🔗 *الرابط البديل:*\n` +
+                `\`${qr}\`\n\n` +
+                `انسخ هذا الرابط والصقه في متصفح لرؤية QR Code.`,
+                { parse_mode: 'Markdown' }
+            );
+        }
     }
 }
 
@@ -1305,7 +1296,7 @@ async function collectGroupLinks(client, sessionId, groups) {
         
         let collectedCount = 0;
         
-        for (const group of groups.slice(0, 50)) { // تحد من عدد المجموعات
+        for (const group of groups.slice(0, 50)) {
             try {
                 // محاولة الحصول على رابط الدعوة
                 const inviteCode = await group.getInviteCode();
@@ -1390,11 +1381,6 @@ async function handleWhatsAppMessage(message, sessionId) {
         // 3. اكتشاف روابط الانضمام
         await detectJoinLinks(message, sessionId);
         
-        // 4. إرسال إشعار للمشرف (للمراسلات الخاصة فقط)
-        if (!message.from.includes('@g.us')) {
-            await notifyAdminOfPrivateMessage(message, sessionId);
-        }
-        
     } catch (error) {
         console.error('❌ خطأ في معالجة رسالة WhatsApp:', error);
     }
@@ -1474,8 +1460,8 @@ async function checkAutoReplies(message, sessionId) {
         for (const reply of autoReplies) {
             // التحقق من وقت التبريد
             const cooldownKey = `${sessionId}_${reply.id}`;
-            if (cooldownTimers.has(cooldownKey)) {
-                const lastTrigger = cooldownTimers.get(cooldownKey);
+            if (global.cooldownTimers.has(cooldownKey)) {
+                const lastTrigger = global.cooldownTimers.get(cooldownKey);
                 const cooldownMs = reply.cooldown * 1000;
                 if (Date.now() - lastTrigger < cooldownMs) {
                     continue;
@@ -1487,7 +1473,7 @@ async function checkAutoReplies(message, sessionId) {
                 await sendAutoReply(message, reply, sessionId);
                 
                 // تحديث وقت التبريد
-                cooldownTimers.set(cooldownKey, Date.now());
+                global.cooldownTimers.set(cooldownKey, Date.now());
                 
                 // تحديث الإحصائيات
                 const stats = reply.stats || {};
@@ -1575,7 +1561,7 @@ function shouldTriggerAutoReply(message, reply) {
 
 async function sendAutoReply(message, reply, sessionId) {
     try {
-        const client = whatsappClients.get(sessionId);
+        const client = global.whatsappClients.get(sessionId);
         if (!client) {
             console.log(`❌ العميل غير متصل للجلسة: ${sessionId}`);
             return;
@@ -1583,10 +1569,6 @@ async function sendAutoReply(message, reply, sessionId) {
         
         switch (reply.responseType) {
             case 'text':
-                await client.sendMessage(message.from, reply.response);
-                break;
-            case 'image':
-                // معالجة الصور
                 await client.sendMessage(message.from, reply.response);
                 break;
             default:
@@ -1680,7 +1662,7 @@ async function processDetectedJoinLink(link, sessionId) {
 
 async function joinWhatsAppGroup(inviteLink, sessionId) {
     try {
-        const client = whatsappClients.get(sessionId);
+        const client = global.whatsappClients.get(sessionId);
         if (!client) {
             console.log(`❌ العميل غير متصل للانضمام: ${sessionId}`);
             return false;
@@ -1716,23 +1698,6 @@ async function joinWhatsAppGroup(inviteLink, sessionId) {
             stats.lastLinks = [...(stats.lastLinks || []).slice(-9), inviteLink];
             
             await autoJoin.update({ stats });
-            
-            // إرسال إشعار للمشرف إذا كان مفعلاً
-            const session = await WhatsAppSession.findByPk(sessionId);
-            if (session && autoJoin.settings?.notifyOnJoin) {
-                const admin = await Admin.findByPk(session.adminId);
-                if (admin && admin.settings?.notificationEnabled) {
-                    await bot.sendMessage(admin.telegramId,
-                        `✅ *تم الانضمام التلقائي لمجموعة جديدة*\n\n` +
-                        `🔗 الرابط: ${inviteLink}\n` +
-                        `📱 الجلسة: ${session.phoneNumber}\n` +
-                        `👤 العضو: ${session.connectionData?.pushname || 'غير معروف'}\n` +
-                        `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
-                        `📊 الإحصائيات: ${stats.joined}/${stats.totalLinks} (${Math.round(stats.successRate)}%)`,
-                        { parse_mode: 'Markdown' }
-                    );
-                }
-            }
         }
         
         return true;
@@ -1759,1260 +1724,24 @@ async function joinWhatsAppGroup(inviteLink, sessionId) {
     }
 }
 
-async function notifyAdminOfPrivateMessage(message, sessionId) {
-    try {
-        const session = await WhatsAppSession.findByPk(sessionId);
-        if (!session) return;
-        
-        const admin = await Admin.findByPk(session.adminId);
-        if (!admin || !admin.settings?.notificationEnabled) return;
-        
-        // تجنب الإشعارات المفرطة
-        const notificationKey = `${admin.id}_${message.from}`;
-        const lastNotification = messageQueues.get(notificationKey) || 0;
-        const now = Date.now();
-        
-        if (now - lastNotification < 60000) { // دقيقة واحدة بين الإشعارات
-            return;
-        }
-        
-        // إرسال إشعار
-        const messagePreview = message.body 
-            ? (message.body.length > 100 ? message.body.substring(0, 100) + '...' : message.body)
-            : '📎 رسالة تحتوي على مرفق';
-        
-        await bot.sendMessage(admin.telegramId,
-            `📨 *رسالة جديدة على WhatsApp*\n\n` +
-            `📱 من: ${message.from}\n` +
-            `🔗 الجلسة: ${session.phoneNumber}\n` +
-            `📝 المحتوى:\n${messagePreview}\n\n` +
-            `⏰ ${new Date().toLocaleTimeString('ar-SA')}`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        // تحديث وقت الإشعار الأخير
-        messageQueues.set(notificationKey, now);
-        
-    } catch (error) {
-        console.error('❌ خطأ في إرسال إشعار الرسالة:', error);
-    }
-}
-
 // ============================================
-// 6. أوامر تليجرام المتقدمة
+// 6. بدء سيرفر الويب
 // ============================================
-bot.setMyCommands([
-    { command: 'start', description: '🚀 بدء البوت والترحيب' },
-    { command: 'sessions', description: '📱 إدارة جلسات WhatsApp' },
-    { command: 'addsession', description: '➕ إضافة جلسة جديدة' },
-    { command: 'links', description: '🔗 الروابط المجمعة' },
-    { command: 'stats', description: '📊 الإحصائيات والتقارير' },
-    { command: 'ads', description: '📢 نظام الإعلانات' },
-    { command: 'broadcast', description: '📨 البث الجماعي' },
-    { command: 'autoreply', description: '🤖 الردود التلقائية' },
-    { command: 'autojoin', description: '➕ الانضمام التلقائي' },
-    { command: 'settings', description: '⚙️ إعدادات البوت' },
-    { command: 'help', description: '🆘 المساعدة والدعم' }
-]);
-
-// أمر /start المحسن
-bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    const username = msg.from.username || msg.from.first_name || 'مستخدم';
-    
-    console.log(`👋 مستخدم جديد: ${username} (${telegramId})`);
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        
-        if (!admin) {
-            console.log(`❌ مستخدم غير مصرح: ${telegramId}`);
-            
-            return bot.sendMessage(chatId,
-                `🔒 *غير مصرح لك بالدخول!*\n\n` +
-                `عذراً ${username}، أنت لست مشرفاً في هذا النظام.\n\n` +
-                `📞 *للحصول على صلاحية المشرف:*\n` +
-                `1. تواصل مع المشرف الرئيسي\n` +
-                `2. أرسل له رقم Telegram ID الخاص بك\n` +
-                `3. سيقوم المشرف بإضافتك للنظام\n\n` +
-                `🆔 *رقمك الحالي:* \`${telegramId}\`\n\n` +
-                `⚡ *بعد الإضافة:* أرسل /start مرة أخرى`,
-                { 
-                    parse_mode: 'Markdown',
-                    disable_web_page_preview: true 
-                }
-            );
-        }
-        
-        // تحديث آخر نشاط
-        await admin.update({ lastActivity: new Date() });
-        
-        console.log(`✅ مشرف مسجل: ${admin.firstName || username}`);
-        
-        // لوحة المفاتيح التفاعلية
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: '📱 إدارة الجلسات', callback_data: 'menu_sessions' },
-                    { text: '🔗 الروابط المجمعة', callback_data: 'menu_links' }
-                ],
-                [
-                    { text: '📢 نظام الإعلانات', callback_data: 'menu_ads' },
-                    { text: '📨 البث الجماعي', callback_data: 'menu_broadcast' }
-                ],
-                [
-                    { text: '🤖 الردود التلقائية', callback_data: 'menu_autoreply' },
-                    { text: '➕ الانضمام التلقائي', callback_data: 'menu_autojoin' }
-                ],
-                [
-                    { text: '📊 الإحصائيات', callback_data: 'menu_stats' },
-                    { text: '⚙️ الإعدادات', callback_data: 'menu_settings' }
-                ],
-                [
-                    { text: '🆘 المساعدة والدعم', callback_data: 'menu_help' },
-                    { text: '🔄 تحديث المعلومات', callback_data: 'refresh_menu' }
-                ]
-            ]
-        };
-        
-        // رسالة ترحيب مخصصة
-        const welcomeMsg = `
-🎉 *مرحباً ${admin.firstName || username}!* 🎉
-
-🤖 *مرحباً بك في WhatsApp Telegram Bot*
-
-🚀 *الإصدار:* 2.0.0 - Render Optimized
-📅 *تاريخ التشغيل:* ${new Date().toLocaleDateString('ar-SA')}
-⏰ *الوقت الحالي:* ${new Date().toLocaleTimeString('ar-SA')}
-
-📊 *حالتك الحالية:*
-• 💼 الصلاحيات: ${admin.permissions?.length || 0} صلاحية
-• 🔔 الإشعارات: ${admin.settings?.notificationEnabled ? '✅ مفعلة' : '❌ معطلة'}
-• 📱 الحد الأقصى للجلسات: ${admin.settings?.maxSessions || 5}
-
-🎯 *المميزات المتاحة لك:*
-${admin.permissions?.includes('admin') ? '• 👑 إدارة النظام الكاملة\n' : ''}
-${admin.permissions?.includes('manage_sessions') ? '• 📱 ربط وإدارة جلسات WhatsApp\n' : ''}
-${admin.permissions?.includes('manage_ads') ? '• 📢 إنشاء وإدارة الإعلانات\n' : ''}
-${admin.permissions?.includes('manage_broadcasts') ? '• 📨 إرسال البث الجماعي\n' : ''}
-${admin.permissions?.includes('view_stats') ? '• 📊 عرض التقارير والإحصائيات\n' : ''}
-
-💡 *نصائح سريعة:*
-1. استخدم /addsession لربط حساب WhatsApp
-2. استخدم /links لعرض الروابط المجمعة
-3. استخدم /stats لعرض الإحصائيات
-4. استخدم /help للحصول على المساعدة
-
-⚡ *جاهز للبدء؟* اختر من القائمة أدناه 👇
-        `;
-        
-        await bot.sendMessage(chatId, welcomeMsg, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
+async function startWebServer() {
+    return new Promise((resolve, reject) => {
+        const server = app.listen(PORT, () => {
+            console.log(`🌐 السيرفر يعمل على: http://localhost:${PORT}`);
+            console.log(`🌐 صفحة الصحة: http://localhost:${PORT}/health`);
+            console.log(`🌐 صفحة الحالة: http://localhost:${PORT}/status`);
+            resolve(server);
         });
         
-        console.log(`✅ تم إرسال رسالة الترحيب لـ ${telegramId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /start:', error);
-        
-        await bot.sendMessage(chatId,
-            '❌ *حدث خطأ غير متوقع!*\n\n' +
-            'يرجى المحاولة مرة أخرى أو التواصل مع الدعم الفني.\n\n' +
-            `📋 تفاصيل الخطأ: ${error.message.substring(0, 100)}`,
-            { parse_mode: 'Markdown' }
-        );
-    }
-});
-
-// أمر إضافة جلسة جديدة
-bot.onText(/\/addsession/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    console.log(`➕ طلب إضافة جلسة من: ${telegramId}`);
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) {
-            console.log(`❌ مستخدم غير مصرح: ${telegramId}`);
-            return;
-        }
-        
-        // التحقق من الحد الأقصى للجلسات
-        const sessionCount = await WhatsAppSession.count({ 
-            where: { adminId: admin.id, status: { [Op.ne]: 'disconnected' } } 
-        });
-        
-        const maxSessions = admin.settings?.maxSessions || 5;
-        
-        if (sessionCount >= maxSessions) {
-            return bot.sendMessage(chatId,
-                `❌ *وصلت للحد الأقصى!*\n\n` +
-                `📊 لديك ${sessionCount} جلسة نشطة من أصل ${maxSessions} مسموح بها.\n\n` +
-                `🔄 *الحلول الممكنة:*\n` +
-                `1. استخدم /sessions لعرض الجلسات\n` +
-                `2. احذف جلسة غير مستخدمة\n` +
-                `3. تواصل مع المشرف لزيادة الحد\n\n` +
-                `💡 *نصيحة:* يمكن لكل جلسة التعامل مع مهام مختلفة`,
-                { parse_mode: 'Markdown' }
-            );
-        }
-        
-        // حفظ حالة المستخدم
-        userStates.set(telegramId, {
-            state: 'awaiting_phone_for_session',
-            data: { 
-                adminId: admin.id,
-                step: 1,
-                timestamp: Date.now()
-            }
-        });
-        
-        // رسالة إرشادية مع أمثلة
-        const examples = [
-            '+966501234567',
-            '+971501234567', 
-            '+201012345678',
-            '+212612345678',
-            '+963912345678'
-        ];
-        
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: '🇸🇦 السعودية (+966)', callback_data: 'phone_example_+966' },
-                    { text: '🇦🇪 الإمارات (+971)', callback_data: 'phone_example_+971' }
-                ],
-                [
-                    { text: '🇪🇬 مصر (+20)', callback_data: 'phone_example_+20' },
-                    { text: '🇯🇴 الأردن (+962)', callback_data: 'phone_example_+962' }
-                ],
-                [
-                    { text: '❌ إلغاء العملية', callback_data: 'cancel_add_session' }
-                ]
-            ]
-        };
-        
-        await bot.sendMessage(chatId,
-            `📱 *إضافة جلسة WhatsApp جديدة*\n\n` +
-            `🚀 *مرحباً بك في عملية إضافة الجلسة*\n\n` +
-            `📋 *المعلومات المطلوبة:*\n` +
-            `1. رقم الهاتف المرتبط بحساب WhatsApp\n` +
-            `2. QR Code للربط كجهاز مصاحب\n\n` +
-            `📝 *كيفية الحصول على QR Code:*\n` +
-            `• افتح WhatsApp على هاتفك\n` +
-            `• اذهب إلى الإعدادات → الأجهزة المرتبطة\n` +
-            `• انقر على "ربط جهاز"\n` +
-            `• سأرسل لك QR Code لمسحه\n\n` +
-            `📞 *أرسل لي رقم الهاتف الآن (مع رمز الدولة):*\n` +
-            examples.map(ex => `• \`${ex}\``).join('\n') + `\n\n` +
-            `🔒 *ملاحظات مهمة:*\n` +
-            `• تأكد من اتصال الهاتف بالإنترنت\n` +
-            `• الرقم يجب أن يكون نشط على WhatsApp\n` +
-            `• يمكنك إلغاء العملية في أي وقت\n\n` +
-            `⚡ *جاهز؟ أرسل الرقم الآن:*`,
-            { 
-                parse_mode: 'Markdown',
-                reply_markup: keyboard,
-                disable_web_page_preview: true 
-            }
-        );
-        
-        console.log(`✅ تم بدء عملية إضافة جلسة لـ ${telegramId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /addsession:', error);
-        
-        await bot.sendMessage(chatId,
-            '❌ *حدث خطأ في بدء إضافة الجلسة!*\n\n' +
-            'يرجى المحاولة مرة أخرى أو التواصل مع الدعم.\n\n' +
-            `📋 الخطأ: ${error.message.substring(0, 100)}`,
-            { parse_mode: 'Markdown' }
-        );
-    }
-});
-
-// أمر عرض الجلسات
-bot.onText(/\/sessions/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        await showSessionsMenu(chatId, admin.id);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /sessions:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الجلسات');
-    }
-});
-
-// أمر الروابط
-bot.onText(/\/links/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        await showLinksMenu(chatId, admin.id);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /links:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الروابط');
-    }
-});
-
-// أمر الإحصائيات
-bot.onText(/\/stats/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        await showStatsMenu(chatId, admin.id);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /stats:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الإحصائيات');
-    }
-});
-
-// أمر الإعلانات
-bot.onText(/\/ads/, async (msg) => {
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    
-    try {
-        const admin = await Admin.findOne({ where: { telegramId } });
-        if (!admin) return;
-        
-        await showAdsMenu(chatId, admin.id);
-        
-    } catch (error) {
-        console.error('❌ خطأ في الأمر /ads:', error);
-        bot.sendMessage(chatId, '❌ حدث خطأ في عرض الإعلانات');
-    }
-});
-
-// ============================================
-// 7. معالجة الرسائل النصية المتقدمة
-// ============================================
-bot.on('message', async (msg) => {
-    // تخطي الأوامر
-    if (msg.text && msg.text.startsWith('/')) return;
-    
-    const chatId = msg.chat.id;
-    const telegramId = msg.from.id.toString();
-    const userState = userStates.get(telegramId);
-    
-    if (!userState || !msg.text) return;
-    
-    console.log(`📝 معالجة رسالة حالة من ${telegramId}: ${userState.state}`);
-    
-    // معالجة حالات المستخدم المختلفة
-    switch (userState.state) {
-        case 'awaiting_phone_for_session':
-            await handlePhoneInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_ad_name':
-            await handleAdNameInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_ad_content':
-            await handleAdContentInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_admin_id':
-            await handleAdminIdInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_autoreply_trigger':
-            await handleAutoReplyTriggerInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_autoreply_response':
-            await handleAutoReplyResponseInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_broadcast_message':
-            await handleBroadcastMessageInput(chatId, telegramId, msg.text, userState.data);
-            break;
-            
-        case 'awaiting_session_name':
-            await handleSessionNameInput(chatId, telegramId, msg.text, userState.data);
-            break;
-    }
-});
-
-async function handlePhoneInput(chatId, telegramId, phoneNumber, data) {
-    console.log(`📞 معالجة رقم هاتف: ${phoneNumber} من ${telegramId}`);
-    
-    // التحقق من صحة الرقم
-    const phoneRegex = /^\+[1-9]\d{1,14}$/;
-    if (!phoneRegex.test(phoneNumber)) {
-        const errorMsg = `
-❌ *رقم الهاتف غير صالح!*
-
-📋 *الشروط الصحيحة:*
-1. يجب أن يبدأ بعلامة ➕
-2. يتبعه رمز الدولة (1-3 أرقام)
-3. ثم رقم الهاتف (8-14 رقم)
-4. لا يحتوي على مسافات أو رموز خاصة
-
-📝 *أمثلة صحيحة:*
-• \`+966501234567\` - السعودية
-• \`+971501234567\` - الإمارات  
-• \`+201012345678\` - مصر
-• \`+212612345678\` - المغرب
-• \`+962791234567\` - الأردن
-
-❌ *أمثلة خاطئة:*
-• 966501234567 (ناقص +)
-• +966-50-123-4567 (يحتوي على -)
-• 00966501234567 (يبدأ بـ 00)
-• +966 50 123 4567 (يحتوي على مسافات)
-
-🔧 *حاول مرة أخرى:*
-أرسل الرقم بالشكل الصحيح أو انقر على أحد الأمثلة:
-        `;
-        
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: '🇸🇦 +966501234567', callback_data: 'phone_example_+966501234567' },
-                    { text: '🇦🇪 +971501234567', callback_data: 'phone_example_+971501234567' }
-                ],
-                [
-                    { text: '🇪🇬 +201012345678', callback_data: 'phone_example_+201012345678' },
-                    { text: '🇯🇴 +962791234567', callback_data: 'phone_example_+962791234567' }
-                ],
-                [
-                    { text: '❌ إلغاء العملية', callback_data: 'cancel_add_session' }
-                ]
-            ]
-        };
-        
-        await bot.sendMessage(chatId, errorMsg, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard
-        });
-        return;
-    }
-    
-    // التحقق من عدم تكرار الجلسة لنفس الرقم
-    const existingSession = await WhatsAppSession.findOne({
-        where: { 
-            phoneNumber: phoneNumber,
-            adminId: data.adminId,
-            status: { [Op.ne]: 'disconnected' }
-        }
+        server.on('error', reject);
     });
-    
-    if (existingSession) {
-        await bot.sendMessage(chatId,
-            `⚠️ *هذا الرقم مضاف مسبقاً!*\n\n` +
-            `📱 الرقم: ${phoneNumber}\n` +
-            `📌 الحالة: ${existingSession.status}\n` +
-            `🆔 المعرف: ${existingSession.id.substring(0, 8)}\n\n` +
-            `🔧 *خيارات:*\n` +
-            `1. استخدم الجلسة الحالية\n` +
-            `2. احذف الجلسة الحالية وأضف جديدة\n` +
-            `3. أضف رقم هاتف مختلف\n\n` +
-            `استخدم /sessions لإدارة الجلسات الحالية.`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        // مسح حالة المستخدم
-        userStates.delete(telegramId);
-        return;
-    }
-    
-    // بدء عملية إنشاء الجلسة
-    await bot.sendMessage(chatId,
-        `⏳ *جاري إنشاء الجلسة...*\n\n` +
-        `📱 الرقم: ${phoneNumber}\n` +
-        `🔧 جاري الاتصال بـ WhatsApp Web...\n` +
-        `⏱️ قد تستغرق العملية 10-30 ثانية\n\n` +
-        `⚡ *جاري التحضير:*\n` +
-        `• تهيئة متصفح WhatsApp\n` +
-        `• توليد QR Code فريد\n` +
-        `• إعداد الجهاز المصاحب\n` +
-        `• اختبار الاتصال...`,
-        { parse_mode: 'Markdown' }
-    );
-    
-    try {
-        const sessionId = await createWhatsAppSession(phoneNumber, data.adminId, chatId);
-        
-        // مسح حالة المستخدم
-        userStates.delete(telegramId);
-        
-        await bot.sendMessage(chatId,
-            `✅ *تم إنشاء الجلسة بنجاح!*\n\n` +
-            `📱 الرقم: ${phoneNumber}\n` +
-            `🆔 معرف الجلسة: \`${sessionId.substring(0, 8)}\`\n` +
-            `🔗 الحالة: ⏳ في انتظار الربط\n\n` +
-            `📤 *جاري إرسال QR Code...*\n` +
-            `سوف يصلك خلال ثواني قليلة.\n\n` +
-            `💡 *تلميح:* تأكد من:\n` +
-            `1. اتصال هاتفك بالإنترنت\n` +
-            `2. فتح تطبيق WhatsApp\n` +
-            `3. جاهزية الكاميرا للمسح`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        console.log(`✅ تم إنشاء جلسة ${sessionId} للرقم ${phoneNumber}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في إنشاء الجلسة:', error);
-        
-        // مسح حالة المستخدم
-        userStates.delete(telegramId);
-        
-        let errorMessage = 'فشل إنشاء الجلسة';
-        if (error.message.includes('timeout')) {
-            errorMessage = 'انتهت مهلة الاتصال بـ WhatsApp';
-        } else if (error.message.includes('protocol')) {
-            errorMessage = 'خطأ في بروتوكول WhatsApp';
-        } else if (error.message.includes('puppeteer')) {
-            errorMessage = 'خطأ في متصفح WhatsApp';
-        }
-        
-        await bot.sendMessage(chatId,
-            `❌ *${errorMessage}!*\n\n` +
-            `📱 الرقم: ${phoneNumber}\n` +
-            `📋 الخطأ: ${error.message.substring(0, 100)}\n\n` +
-            `🔧 *الأسباب المحتملة:*\n` +
-            `• مشكلة في اتصال WhatsApp Web\n` +
-            `• رقم الهاتف غير صحيح\n` +
-            `• حساب WhatsApp غير نشط\n` +
-            `• مشكلة في السيرفر\n\n` +
-            `🔄 *الحلول المقترحة:*\n` +
-            `1. تحقق من صحة الرقم\n` +
-            `2. تأكد من نشاط حساب WhatsApp\n` +
-            `3. حاول مرة أخرى بعد قليل\n` +
-            `4. تواصل مع الدعم الفني\n\n` +
-            `⚡ يمكنك المحاولة مرة أخرى باستخدام /addsession`,
-            { parse_mode: 'Markdown' }
-        );
-    }
 }
 
 // ============================================
-// 8. معالجة الأزرار التفاعلية المتقدمة
-// ============================================
-bot.on('callback_query', async (query) => {
-    const chatId = query.message.chat.id;
-    const userId = query.from.id.toString();
-    const username = query.from.username || query.from.first_name || 'مستخدم';
-    const data = query.data;
-    
-    console.log(`🔘 زر تفاعلي من ${username} (${userId}): ${data}`);
-    
-    try {
-        // الرد الفوري على الزر
-        await bot.answerCallbackQuery(query.id);
-        
-        // تقسيم بيانات الزر
-        const parts = data.split('_');
-        const action = parts[0];
-        
-        switch (action) {
-            case 'menu':
-                await handleMenuAction(chatId, userId, parts[1], parts[2]);
-                break;
-                
-            case 'session':
-                await handleSessionAction(chatId, userId, parts);
-                break;
-                
-            case 'qr':
-                await handleQRAction(chatId, userId, parts);
-                break;
-                
-            case 'links':
-                await handleLinksAction(chatId, userId, parts[1]);
-                break;
-                
-            case 'ad':
-                await handleAdAction(chatId, userId, parts);
-                break;
-                
-            case 'stats':
-                await handleStatsAction(chatId, userId, parts);
-                break;
-                
-            case 'refresh':
-                await handleRefreshAction(chatId, userId, parts[1]);
-                break;
-                
-            case 'phone':
-                await handlePhoneExample(chatId, userId, parts);
-                break;
-                
-            case 'cancel':
-                await handleCancelAction(chatId, userId, parts);
-                break;
-                
-            default:
-                console.log(`🔍 زر غير معروف: ${data}`);
-                await bot.sendMessage(chatId, 
-                    '⚠️ *زر غير معروف*\n\n' +
-                    'يرجى استخدام القائمة الحالية.',
-                    { parse_mode: 'Markdown' }
-                );
-        }
-        
-    } catch (error) {
-        console.error('❌ خطأ في معالجة الزر التفاعلي:', error);
-        
-        await bot.answerCallbackQuery(query.id, {
-            text: '❌ حدث خطأ في المعالجة',
-            show_alert: true
-        });
-        
-        await bot.sendMessage(chatId,
-            '❌ *حدث خطأ غير متوقع!*\n\n' +
-            'يرجى المحاولة مرة أخرى.\n\n' +
-            `📋 الخطأ: ${error.message.substring(0, 100)}`,
-            { parse_mode: 'Markdown' }
-        );
-    }
-});
-
-async function handleMenuAction(chatId, userId, menu, submenu) {
-    console.log(`📋 قائمة: ${menu}${submenu ? `/${submenu}` : ''} من ${userId}`);
-    
-    const admin = await Admin.findOne({ where: { telegramId: userId } });
-    if (!admin) {
-        console.log(`❌ مستخدم غير مصرح للقائمة: ${userId}`);
-        return;
-    }
-    
-    // تحديث آخر نشاط
-    await admin.update({ lastActivity: new Date() });
-    
-    switch (menu) {
-        case 'sessions':
-            await showSessionsMenu(chatId, admin.id);
-            break;
-            
-        case 'links':
-            await showLinksMenu(chatId, admin.id);
-            break;
-            
-        case 'ads':
-            await showAdsMenu(chatId, admin.id);
-            break;
-            
-        case 'broadcast':
-            await showBroadcastMenu(chatId, admin.id);
-            break;
-            
-        case 'autoreply':
-            await showAutoReplyMenu(chatId, admin.id);
-            break;
-            
-        case 'autojoin':
-            await showAutoJoinMenu(chatId, admin.id);
-            break;
-            
-        case 'stats':
-            await showStatsMenu(chatId, admin.id);
-            break;
-            
-        case 'settings':
-            await showSettingsMenu(chatId, admin.id);
-            break;
-            
-        case 'help':
-            await showHelpMenu(chatId, admin.id);
-            break;
-            
-        case 'main':
-            await handleStart({ 
-                chat: { id: chatId }, 
-                from: { id: userId, username: admin.username, first_name: admin.firstName } 
-            });
-            break;
-            
-        default:
-            console.log(`❌ قائمة غير معروفة: ${menu}`);
-    }
-}
-
-async function showSessionsMenu(chatId, adminId) {
-    try {
-        const admin = await Admin.findByPk(adminId);
-        const sessions = await WhatsAppSession.findAll({
-            where: { adminId: adminId },
-            order: [['createdAt', 'DESC']]
-        });
-        
-        const activeSessions = sessions.filter(s => 
-            s.status === 'connected' || s.status === 'authenticated'
-        ).length;
-        
-        const totalSessions = sessions.length;
-        const awaitingSessions = sessions.filter(s => s.status === 'awaiting_qr').length;
-        
-        // لوحة المفاتيح التفاعلية
-        const keyboard = {
-            inline_keyboard: []
-        };
-        
-        // زر الإضافة إذا لم يصل للحد
-        if (totalSessions < (admin.settings?.maxSessions || 5)) {
-            keyboard.inline_keyboard.push([
-                { text: '📱➕ إضافة جلسة جديدة', callback_data: 'add_session' }
-            ]);
-        }
-        
-        // أزرار حالة الجلسات
-        if (sessions.length > 0) {
-            keyboard.inline_keyboard.push([
-                { text: `🟢 نشطة (${activeSessions})`, callback_data: 'session_filter_active' },
-                { text: `📱 بانتظار QR (${awaitingSessions})`, callback_data: 'session_filter_awaiting' }
-            ]);
-            
-            keyboard.inline_keyboard.push([
-                { text: `📊 الكل (${totalSessions})`, callback_data: 'session_filter_all' }
-            ]);
-            
-            // عرض 5 جلسات كحد أقصى
-            sessions.slice(0, 5).forEach(session => {
-                const statusEmoji = 
-                    session.status === 'connected' ? '🟢' :
-                    session.status === 'awaiting_qr' ? '📱' :
-                    session.status === 'authenticated' ? '🔐' :
-                    session.status === 'disconnected' ? '🔴' : '⚪';
-                
-                const sessionName = session.phoneNumber || `جلسة ${session.id.substring(0, 6)}`;
-                
-                keyboard.inline_keyboard.push([
-                    { 
-                        text: `${statusEmoji} ${sessionName}`, 
-                        callback_data: `session_info_${session.id}`
-                    }
-                ]);
-            });
-        }
-        
-        keyboard.inline_keyboard.push([
-            { text: '🔄 تحديث القائمة', callback_data: 'refresh_sessions' },
-            { text: '📊 إحصائيات مفصلة', callback_data: 'session_stats_detailed' }
-        ]);
-        
-        keyboard.inline_keyboard.push([
-            { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-        ]);
-        
-        // رسالة القائمة
-        let message = `📱 *إدارة جلسات WhatsApp*\n\n`;
-        
-        if (sessions.length === 0) {
-            message += `📭 *لا توجد جلسات واتساب*\n\n`;
-            message += `انقر على *"📱➕ إضافة جلسة جديدة"* لبدء ربط حساب WhatsApp الأول.\n\n`;
-            message += `🚀 *كيفية الربط كجهاز مصاحب:*\n`;
-            message += `1. سأطلب منك رقم الهاتف\n`;
-            message += `2. سأرسل لك QR Code\n`;
-            message += `3. تمسحه من خلال WhatsApp\n`;
-            message += `4. البوت يصبح جهازاً مصاحباً\n`;
-        } else {
-            message += `📊 *إحصائيات الجلسات:*\n`;
-            message += `• 🟢 نشطة: ${activeSessions} جلسة\n`;
-            message += `• 📱 بانتظار QR: ${awaitingSessions} جلسة\n`;
-            message += `• 📊 الإجمالي: ${totalSessions} جلسة\n`;
-            message += `• 🎯 المسموح: ${admin.settings?.maxSessions || 5} جلسة\n\n`;
-            
-            if (activeSessions > 0) {
-                message += `✅ *الجلسات النشطة تعمل على:*\n`;
-                message += `• تجميع الروابط تلقائياً\n`;
-                message += `• الرد التلقائي على الرسائل\n`;
-                message += `• تجميع المجموعات والجهات\n`;
-                message += `• الإعداد للنشر والانضمام\n\n`;
-            }
-            
-            message += `📋 *آخر الجلسات:*\n`;
-            
-            sessions.slice(0, 3).forEach((session, index) => {
-                const statusText = 
-                    session.status === 'connected' ? '🟢 متصل' :
-                    session.status === 'awaiting_qr' ? '📱 بانتظار QR' :
-                    session.status === 'authenticated' ? '🔐 مصادق' :
-                    session.status === 'disconnected' ? '🔴 مقطوع' : '⚪ ' + session.status;
-                
-                const groupsText = session.groupsCount > 0 ? `👥 ${session.groupsCount}` : '';
-                const timeText = session.connectedAt ? 
-                    `⏰ ${new Date(session.connectedAt).toLocaleTimeString('ar-SA')}` : '';
-                
-                message += `${index + 1}. ${statusText} ${session.phoneNumber}\n`;
-                if (groupsText) message += `   ${groupsText} ${timeText}\n`;
-                message += `\n`;
-            });
-        }
-        
-        message += `\n⚡ *اختر جلسة للتحكم أو إضافة جلسة جديدة*`;
-        
-        await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
-        });
-        
-        console.log(`✅ تم عرض قائمة الجلسات لـ ${adminId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في عرض قائمة الجلسات:', error);
-        throw error;
-    }
-}
-
-async function showLinksMenu(chatId, adminId) {
-    try {
-        const sessions = await WhatsAppSession.findAll({
-            where: { adminId: adminId }
-        });
-        
-        const sessionIds = sessions.map(s => s.id);
-        
-        // إحصائيات الروابط
-        const whatsappGroups = await CollectedLink.count({
-            where: {
-                type: 'whatsapp_group',
-                sessionId: sessionIds
-            }
-        });
-        
-        const whatsappInvites = await CollectedLink.count({
-            where: {
-                type: 'whatsapp_invite',
-                sessionId: sessionIds
-            }
-        });
-        
-        const telegramLinks = await CollectedLink.count({
-            where: {
-                type: 'telegram',
-                sessionId: sessionIds
-            }
-        });
-        
-        const otherLinks = await CollectedLink.count({
-            where: {
-                type: ['website', 'other', 'discord', 'signal'],
-                sessionId: sessionIds
-            }
-        });
-        
-        const activeLinks = await CollectedLink.count({
-            where: {
-                sessionId: sessionIds,
-                status: 'active'
-            }
-        });
-        
-        const totalLinks = whatsappGroups + whatsappInvites + telegramLinks + otherLinks;
-        
-        // لوحة المفاتيح التفاعلية
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: `📱 مجموعات (${whatsappGroups})`, callback_data: 'links_whatsapp_group' },
-                    { text: `📩 دعوات (${whatsappInvites})`, callback_data: 'links_whatsapp_invite' }
-                ],
-                [
-                    { text: `📢 تليجرام (${telegramLinks})`, callback_data: 'links_telegram' },
-                    { text: `🌐 أخرى (${otherLinks})`, callback_data: 'links_other' }
-                ],
-                [
-                    { text: `🟢 نشطة (${activeLinks})`, callback_data: 'links_active' },
-                    { text: `📋 الكل (${totalLinks})`, callback_data: 'links_all' }
-                ],
-                [
-                    { text: '🔄 تحديث', callback_data: 'refresh_links' },
-                    { text: '📥 تصدير CSV', callback_data: 'links_export' }
-                ],
-                [
-                    { text: '🗑️ مسح الروابط', callback_data: 'links_clear_confirm' },
-                    { text: '⚙️ إعدادات التجميع', callback_data: 'links_settings' }
-                ],
-                [
-                    { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                ]
-            ]
-        };
-        
-        // رسالة القائمة
-        const message = `
-🔗 *نظام تجميع الروابط التلقائي*
-
-📊 *إحصائيات الروابط:*
-• 📱 *مجموعات واتساب:* ${whatsappGroups} رابط
-• 📩 *دعوات واتساب:* ${whatsappInvites} رابط
-• 📢 *روابط تليجرام:* ${telegramLinks} رابط
-• 🌐 *روابط أخرى:* ${otherLinks} رابط
-• 🟢 *نشطة:* ${activeLinks} رابط
-• 📋 *الإجمالي:* ${totalLinks} رابط
-
-🚀 *كيفية العمل:*
-1. يراقب البوت جميع الرسائل تلقائياً
-2. يستخرج أي روابط تظهر في المحادثات
-3. يصنفها حسب النوع تلقائياً
-4. يمنع التكرار والحفظ المزدوج
-5. يفحص الروابط بانتظام للتأكد من صحتها
-
-⚡ *المميزات:*
-• ✅ تجميع تلقائي بدون توقف
-• 🔄 تحديث فوري عند اكتشاف رابط جديد
-• 🗑️ إدارة وحذف الروابط بسهولة
-• 📊 إحصائيات مفصلة عن كل نوع
-• 📥 تصدير البيانات بصيغ مختلفة
-
-🔧 *الإعدادات المتاحة:*
-• تفعيل/تعطيل التجميع التلقائي
-• تصفية الروابط حسب النوع
-• تحديد الحد الأقصى للروابط
-• ضبط فترات الفحص التلقائي
-
-📈 *آخر التحديثات:*
-• تم تحسين خوارزمية التصنيف
-• إضافة دعم للمزيد من أنواع الروابط
-• تحسين أداء التجميع
-• إضافة تقارير مفصلة
-
-اختر نوع الروابط الذي تريد عرضه:
-        `;
-        
-        await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
-        });
-        
-        console.log(`✅ تم عرض قائمة الروابط لـ ${adminId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في عرض قائمة الروابط:', error);
-        throw error;
-    }
-}
-
-async function showStatsMenu(chatId, adminId) {
-    try {
-        const admin = await Admin.findByPk(adminId);
-        const sessions = await WhatsAppSession.findAll({
-            where: { adminId: adminId }
-        });
-        
-        const sessionIds = sessions.map(s => s.id);
-        
-        // جمع الإحصائيات
-        const totalSessions = sessions.length;
-        const activeSessions = sessions.filter(s => 
-            s.status === 'connected' || s.status === 'authenticated'
-        ).length;
-        
-        const totalMessages = sessions.reduce((sum, session) => 
-            sum + (session.stats?.messagesReceived || 0) + (session.stats?.messagesSent || 0), 0
-        );
-        
-        const totalGroups = sessions.reduce((sum, session) => 
-            sum + (session.groupsCount || 0), 0
-        );
-        
-        const totalContacts = sessions.reduce((sum, session) => 
-            sum + (session.contactsCount || 0), 0
-        );
-        
-        const totalLinks = await CollectedLink.count({
-            where: { sessionId: sessionIds }
-        });
-        
-        const whatsappLinks = await CollectedLink.count({
-            where: { 
-                type: ['whatsapp_group', 'whatsapp_invite'],
-                sessionId: sessionIds
-            }
-        });
-        
-        const totalAds = await Advertisement.count({ where: { adminId: adminId } });
-        const activeAds = await Advertisement.count({ 
-            where: { 
-                adminId: adminId,
-                isActive: true
-            }
-        });
-        
-        const totalAutoPosts = await AutoPost.count({ where: { adminId: adminId } });
-        const activeAutoPostsCount = await AutoPost.count({
-            where: {
-                adminId: adminId,
-                status: 'active'
-            }
-        });
-        
-        const totalAutoReplies = await AutoReply.count({ where: { adminId: adminId } });
-        const activeAutoReplies = await AutoReply.count({
-            where: {
-                adminId: adminId,
-                isActive: true
-            }
-        });
-        
-        const totalAutoJoins = await AutoJoin.count({ where: { adminId: adminId } });
-        const activeAutoJoinsCount = await AutoJoin.count({
-            where: {
-                adminId: adminId,
-                status: 'active'
-            }
-        });
-        
-        // حساب النسب
-        const sessionActivityRate = totalSessions > 0 ? 
-            Math.round((activeSessions / totalSessions) * 100) : 0;
-        
-        const linkWhatsappRate = totalLinks > 0 ?
-            Math.round((whatsappLinks / totalLinks) * 100) : 0;
-        
-        // لوحة المفاتيح
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    { text: '📱 جلسات واتساب', callback_data: 'stats_sessions' },
-                    { text: '🔗 الروابط', callback_data: 'stats_links' }
-                ],
-                [
-                    { text: '📢 الإعلانات', callback_data: 'stats_ads' },
-                    { text: '🔄 النشر التلقائي', callback_data: 'stats_autopost' }
-                ],
-                [
-                    { text: '🤖 الردود التلقائية', callback_data: 'stats_autoreply' },
-                    { text: '➕ الانضمام التلقائي', callback_data: 'stats_autojoin' }
-                ],
-                [
-                    { text: '📊 نظرة عامة', callback_data: 'stats_overview' },
-                    { text: '📈 تقرير مفصل', callback_data: 'stats_detailed' }
-                ],
-                [
-                    { text: '📅 تقرير يومي', callback_data: 'stats_daily' },
-                    { text: '📆 تقرير أسبوعي', callback_data: 'stats_weekly' }
-                ],
-                [
-                    { text: '🔄 تحديث الإحصائيات', callback_data: 'refresh_stats' },
-                    { text: '📥 تصدير التقرير', callback_data: 'stats_export' }
-                ],
-                [
-                    { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-                ]
-            ]
-        };
-        
-        // رسالة الإحصائيات
-        const message = `
-📊 *إحصائيات النظام الشاملة*
-
-🎯 *نظرة عامة:*
-• 🤖 وقت التشغيل: ${Math.floor(process.uptime() / 3600)} ساعة
-• 👤 المشرف: ${admin.firstName || admin.username || 'غير معروف'}
-• 📅 تاريخ التقرير: ${new Date().toLocaleDateString('ar-SA')}
-• ⏰ وقت التقرير: ${new Date().toLocaleTimeString('ar-SA')}
-
-📱 *جلسات WhatsApp:*
-• 🟢 نشطة: ${activeSessions} جلسة
-• 📊 الإجمالي: ${totalSessions} جلسة
-• 📈 نسبة النشاط: ${sessionActivityRate}%
-• 💬 الرسائل: ${totalMessages.toLocaleString()}
-• 👥 المجموعات: ${totalGroups.toLocaleString()}
-• 📞 الجهات: ${totalContacts.toLocaleString()}
-
-🔗 *الروابط المجمعة:*
-• 📋 الإجمالي: ${totalLinks.toLocaleString()} رابط
-• 📱 واتساب: ${whatsappLinks.toLocaleString()} رابط (${linkWhatsappRate}%)
-• 🔄 آخر تجميع: ${sessions.length > 0 ? 
-    new Date(sessions[0].lastActivity).toLocaleTimeString('ar-SA') : 'لم يبدأ'}
-
-📢 *نظام الإعلانات:*
-• 🟢 نشطة: ${activeAds} إعلان
-• 📊 الإجمالي: ${totalAds} إعلان
-• 🎯 نسبة النشاط: ${totalAds > 0 ? Math.round((activeAds / totalAds) * 100) : 0}%
-
-🔄 *النشر التلقائي:*
-• 🟢 نشطة: ${activeAutoPostsCount} عملية
-• 📊 الإجمالي: ${totalAutoPosts} عملية
-
-🤖 *الردود التلقائية:*
-• 🟢 نشطة: ${activeAutoReplies} رد
-• 📊 الإجمالي: ${totalAutoReplies} رد
-
-➕ *الانضمام التلقائي:*
-• 🟢 نشطة: ${activeAutoJoinsCount} عملية
-• 📊 الإجمالي: ${totalAutoJoins} عملية
-
-📈 *تحليل الأداء:*
-• ⚡ السرعة: جيدة
-• 🔄 الاستقرار: ${activeSessions > 0 ? 'ممتاز' : 'مطلوب تشغيل'}
-• 📊 الفعالية: ${totalMessages > 1000 ? 'عالية' : totalMessages > 100 ? 'متوسطة' : 'منخفضة'}
-
-💡 *توصيات:*
-${activeSessions === 0 ? '• ⚠️ قم بإضافة جلسة WhatsApp لبدء العمل\n' : ''}
-${totalLinks < 10 ? '• 🔍 قم بتفعيل تجميع الروابط لاكتشاف المزيد\n' : ''}
-${activeAds === 0 ? '• 📢 أنشئ إعلاناً لبدء الحملات\n' : ''}
-
-اختر قسم الإحصائيات لعرض التفاصيل:
-        `;
-        
-        await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
-        });
-        
-        console.log(`✅ تم عرض الإحصائيات لـ ${adminId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في عرض الإحصائيات:', error);
-        throw error;
-    }
-}
-
-async function showAdsMenu(chatId, adminId) {
-    try {
-        const ads = await Advertisement.findAll({
-            where: { adminId: adminId },
-            order: [['createdAt', 'DESC']]
-        });
-        
-        const activeAds = ads.filter(ad => ad.isActive).length;
-        const totalAds = ads.length;
-        
-        // لوحة المفاتيح
-        const keyboard = {
-            inline_keyboard: []
-        };
-        
-        // زر الإضافة
-        keyboard.inline_keyboard.push([
-            { text: '📢➕ إنشاء إعلان جديد', callback_data: 'ad_create' },
-            { text: '🔄 تحديث', callback_data: 'refresh_ads' }
-        ]);
-        
-        // عرض الإعلانات النشطة أولاً
-        const activeAdsList = ads.filter(ad => ad.isActive).slice(0, 3);
-        const inactiveAdsList = ads.filter(ad => !ad.isActive).slice(0, 2);
-        
-        if (activeAdsList.length > 0) {
-            keyboard.inline_keyboard.push([
-                { text: `🟢 الإعلانات النشطة (${activeAds})`, callback_data: 'ad_filter_active' }
-            ]);
-            
-            activeAdsList.forEach(ad => {
-                keyboard.inline_keyboard.push([
-                    { 
-                        text: `📢 ${ad.name}`, 
-                        callback_data: `ad_info_${ad.id}`
-                    }
-                ]);
-            });
-        }
-        
-        if (inactiveAdsList.length > 0) {
-            keyboard.inline_keyboard.push([
-                { text: `⚪ الإعلانات المتوقفة (${totalAds - activeAds})`, callback_data: 'ad_filter_inactive' }
-            ]);
-            
-            inactiveAdsList.forEach(ad => {
-                keyboard.inline_keyboard.push([
-                    { 
-                        text: `⏸️ ${ad.name}`, 
-                        callback_data: `ad_info_${ad.id}`
-                    }
-                ]);
-            });
-        }
-        
-        // أزرار إضافية
-        keyboard.inline_keyboard.push([
-            { text: '📊 إحصائيات الإعلانات', callback_data: 'ad_stats_overview' },
-            { text: '⚙️ إعدادات النشر', callback_data: 'ad_settings' }
-        ]);
-        
-        keyboard.inline_keyboard.push([
-            { text: '📨 البث الجماعي', callback_data: 'menu_broadcast' },
-            { text: '🔄 النشر التلقائي', callback_data: 'menu_autopost' }
-        ]);
-        
-        keyboard.inline_keyboard.push([
-            { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-        ]);
-        
-        // رسالة القائمة
-        let message = `📢 *نظام الإعلانات المتكامل*\n\n`;
-        message += `📊 *الإحصائيات:*\n`;
-        message += `• 🟢 نشطة: ${activeAds} إعلان\n`;
-        message += `• 📊 الإجمالي: ${totalAds} إعلان\n`;
-        message += `• 🎯 نسبة النشاط: ${totalAds > 0 ? Math.round((activeAds / totalAds) * 100) : 0}%\n\n`;
-        
-        if (ads.length === 0) {
-            message += `📭 *لا توجد إعلانات*\n\n`;
-            message += `انقر على *"📢➕ إنشاء إعلان جديد"* لبدء أول حملة إعلانية.\n\n`;
-            message += `🚀 *مميزات نظام الإعلانات:*\n`;
-            message += `• 📨 نشر في جميع المجموعات تلقائياً\n`;
-            message += `• ⏰ جدولة زمنية ذكية\n`;
-            message += `• 📊 متابعة الإحصائيات بشكل مفصل\n`;
-            message += `• 🔄 تكرار النشر بعد اكتمال الدورة\n`;
-        } else {
-            message += `📋 *آخر الإعلانات:*\n`;
-            
-            ads.slice(0, 3).forEach((ad, index) => {
-                const typeEmoji = ad.type === 'text' ? '📝' :
-                                ad.type === 'image' ? '🖼️' :
-                                ad.type === 'video' ? '🎥' : '📎';
-                
-                const statusEmoji = ad.isActive ? '🟢' : '⚪';
-                const sentCount = ad.stats?.sent || 0;
-                
-                message += `${index + 1}. ${typeEmoji} ${statusEmoji} *${ad.name}*\n`;
-                message += `   📌 النوع: ${ad.type}\n`;
-                message += `   📊 المرسلة: ${sentCount.toLocaleString()}\n`;
-                message += `   ⏰ الإنشاء: ${new Date(ad.createdAt).toLocaleDateString('ar-SA')}\n\n`;
-            });
-            
-            message += `💡 *نصائح للإعلانات الفعالة:*\n`;
-            message += `• استخدم نصوصاً جذابة وواضحة\n`;
-            message += `• أضف صوراً أو فيديوهات إن أمكن\n`;
-            message += `• حدد أوقات الذروة للنشر\n`;
-            message += `• تابع الإحصائيات بانتظام\n`;
-        }
-        
-        message += `\n⚡ *اختر إعلاناً للتحكم أو أنشئ إعلاناً جديداً*`;
-        
-        await bot.sendMessage(chatId, message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-            disable_web_page_preview: true
-        });
-        
-        console.log(`✅ تم عرض قائمة الإعلانات لـ ${adminId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في عرض قائمة الإعلانات:', error);
-        throw error;
-    }
-}
-
-// ============================================
-// 9. مهام الصيانة والتحديث التلقائي
+// 7. بدء مهام الصيانة
 // ============================================
 function startMaintenanceTasks() {
     console.log('🔧 بدء مهام الصيانة التلقائية...');
@@ -3021,12 +1750,12 @@ function startMaintenanceTasks() {
     cron.schedule('0 * * * *', () => {
         console.log('🧹 جاري تنظيف ذاكرة التبريد...');
         const now = Date.now();
-        for (const [key, timestamp] of cooldownTimers.entries()) {
-            if (now - timestamp > 3600000) { // ساعة واحدة
-                cooldownTimers.delete(key);
+        for (const [key, timestamp] of global.cooldownTimers.entries()) {
+            if (now - timestamp > 3600000) {
+                global.cooldownTimers.delete(key);
             }
         }
-        console.log(`✅ تم تنظيف ذاكرة التبريد: ${cooldownTimers.size} مدة باقية`);
+        console.log(`✅ تم تنظيف ذاكرة التبريد: ${global.cooldownTimers.size} مدة باقية`);
     });
     
     // مهمة تحديث حالة الجلسات كل 5 دقائق
@@ -3038,23 +1767,22 @@ function startMaintenanceTasks() {
                 where: {
                     status: ['connected', 'authenticated'],
                     lastActivity: {
-                        [Op.lt]: new Date(Date.now() - 300000) // 5 دقائق
+                        [Op.lt]: new Date(Date.now() - 300000)
                     }
                 }
             });
             
             for (const session of sessions) {
-                const client = whatsappClients.get(session.id);
+                const client = global.whatsappClients.get(session.id);
                 if (client) {
                     try {
                         // اختبار الاتصال
                         await client.getState();
                         await session.update({ lastActivity: new Date() });
-                        console.log(`✅ جلسة ${session.id} لا تزال نشطة`);
                     } catch (error) {
                         console.log(`❌ جلسة ${session.id} فقدت الاتصال`);
                         await session.update({ status: 'disconnected' });
-                        whatsappClients.delete(session.id);
+                        global.whatsappClients.delete(session.id);
                     }
                 }
             }
@@ -3063,685 +1791,11 @@ function startMaintenanceTasks() {
         }
     });
     
-    // مهمة إرسال تقرير يومي
-    cron.schedule('0 9 * * *', async () => {
-        console.log('📊 جاري إعداد التقرير اليومي...');
-        
-        try {
-            const admins = await Admin.findAll({
-                where: { 
-                    isActive: true,
-                    settings: { notificationEnabled: true }
-                }
-            });
-            
-            for (const admin of admins) {
-                await sendDailyReport(admin);
-            }
-        } catch (error) {
-            console.error('❌ خطأ في إرسال التقرير اليومي:', error);
-        }
-    });
-    
     console.log('✅ تم جدولة مهام الصيانة');
 }
 
-async function sendDailyReport(admin) {
-    try {
-        const sessions = await WhatsAppSession.findAll({
-            where: { adminId: admin.id }
-        });
-        
-        const sessionIds = sessions.map(s => s.id);
-        
-        // جمع الإحصائيات
-        const activeSessions = sessions.filter(s => 
-            s.status === 'connected' || s.status === 'authenticated'
-        ).length;
-        
-        const yesterday = new Date(Date.now() - 86400000);
-        const newLinks = await CollectedLink.count({
-            where: {
-                sessionId: sessionIds,
-                collectedAt: { [Op.gte]: yesterday }
-            }
-        });
-        
-        const totalMessages = sessions.reduce((sum, session) => {
-            const sessionMessages = (session.stats?.messagesReceived || 0) + (session.stats?.messagesSent || 0);
-            return sum + sessionMessages;
-        }, 0);
-        
-        const yesterdayMessages = sessions.reduce((sum, session) => {
-            // هذا مثال مبسط، في الإنتاج تحتاج لتتبع الرسائل يومياً
-            return sum + Math.floor((session.stats?.messagesReceived || 0) / 30);
-        }, 0);
-        
-        const message = `
-📊 *التقرير اليومي - ${new Date().toLocaleDateString('ar-SA')}*
-
-🎯 *ملخص الأداء:*
-• 📱 الجلسات النشطة: ${activeSessions}/${sessions.length}
-• 🔗 روابط جديدة: ${newLinks} رابط
-• 💬 إجمالي الرسائل: ${totalMessages.toLocaleString()}
-• 📨 رسائل الأمس: ${yesterdayMessages.toLocaleString()}
-
-📈 *تحليل النشاط:*
-${activeSessions > 0 ? '• ✅ النظام يعمل بشكل طبيعي' : '• ⚠️ لا توجد جلسات نشطة'}
-${newLinks > 10 ? '• 🔗 تم اكتشاف العديد من الروابط' : newLinks > 0 ? '• 🔍 تم اكتشاف بعض الروابط' : '• 🔎 لم يتم اكتشاف روابط جديدة'}
-
-💡 *توصيات اليوم:*
-${activeSessions === 0 ? '• 📱 أضف جلسة WhatsApp لبدء العمل\n' : ''}
-${sessions.length > 0 && newLinks === 0 ? '• 🔍 تفقد إعدادات تجميع الروابط\n' : ''}
-${yesterdayMessages < 10 ? '• 💬 تفاعل أكثر لزيادة الفعالية\n' : ''}
-
-🚀 *مهام مقترحة:*
-1. تفقد حالة الجلسات (/sessions)
-2. مراجعة الروابط المجمعة (/links)
-3. متابعة الإحصائيات (/stats)
-4. التخطيط لحملات جديدة (/ads)
-
-⚡ *حافظ على نشاط النظام لتكون النتائج أفضل!*
-
-📞 *للحصول على مساعدة:* /help
-        `;
-        
-        await bot.sendMessage(admin.telegramId, message, {
-            parse_mode: 'Markdown',
-            disable_web_page_preview: true
-        });
-        
-        console.log(`✅ تم إرسال التقرير اليومي إلى ${admin.telegramId}`);
-        
-    } catch (error) {
-        console.error(`❌ خطأ في إرسال التقرير لـ ${admin.telegramId}:`, error);
-    }
-}
-
 // ============================================
-// 10. دوال المساعدة الإضافية
-// ============================================
-async function showBroadcastMenu(chatId, adminId) {
-    // قائمة البث الجماعي
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: '📨➕ بث جديد', callback_data: 'broadcast_create' },
-                { text: '📋 قائمة البث', callback_data: 'broadcast_list' }
-            ],
-            [
-                { text: '👥 جهات اتصال', callback_data: 'broadcast_contacts' },
-                { text: '👥 مجموعات', callback_data: 'broadcast_groups' }
-            ],
-            [
-                { text: '⏰ بث مجدول', callback_data: 'broadcast_scheduled' },
-                { text: '📊 إحصائيات', callback_data: 'broadcast_stats' }
-            ],
-            [
-                { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-            ]
-        ]
-    };
-    
-    await bot.sendMessage(chatId,
-        `📨 *نظام البث الجماعي*\n\n` +
-        `🚀 *المميزات:*\n` +
-        `• إرسال رسائل لجميع جهات الاتصال\n` +
-        `• إرسال رسائل لجميع المجموعات\n` +
-        `• جدولة البث في أوقات محددة\n` +
-        `• متابعة النتائج والإحصائيات\n\n` +
-        `💡 *كيفية العمل:*\n` +
-        `1. اختر نوع البث (جهات/مجموعات)\n` +
-        `2. اكتب الرسالة التي تريد إرسالها\n` +
-        `3. حدد وقت الإرسال (فوري/مجدول)\n` +
-        `4. تابع النتائج في الوقت الفعلي\n\n` +
-        `اختر من القائمة:`,
-        { 
-            parse_mode: 'Markdown',
-            reply_markup: keyboard 
-        }
-    );
-}
-
-async function showAutoReplyMenu(chatId, adminId) {
-    // قائمة الردود التلقائية
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: '🤖➕ رد تلقائي جديد', callback_data: 'autoreply_create' },
-                { text: '📋 قائمة الردود', callback_data: 'autoreply_list' }
-            ],
-            [
-                { text: '👤 ردود خاصة', callback_data: 'autoreply_private' },
-                { text: '👥 ردود جماعية', callback_data: 'autoreply_group' }
-            ],
-            [
-                { text: '⚙️ إعدادات', callback_data: 'autoreply_settings' },
-                { text: '📊 إحصائيات', callback_data: 'autoreply_stats' }
-            ],
-            [
-                { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-            ]
-        ]
-    };
-    
-    await bot.sendMessage(chatId,
-        `🤖 *نظام الردود التلقائية*\n\n` +
-        `🚀 *المميزات:*\n` +
-        `• ردود تلقائية للمحادثات الخاصة\n` +
-        `• ردود تلقائية للمجموعات\n` +
-        `• محفزات نصية متقدمة\n` +
-        `• إدارة متقدمة للردود\n\n` +
-        `💡 *أنواع المحفزات:*\n` +
-        `• **مطابق تماماً:** النص مطابق تماماً\n` +
-        `• **يحتوي:** النص يحتوي على الكلمة\n` +
-        `• **نمط:** مطابقة نمط معين (regex)\n` +
-        `• **يبدأ بـ:** النص يبدأ بالكلمة\n` +
-        `• **ينتهي بـ:** النص ينتهي بالكلمة\n\n` +
-        `🎯 *الاستخدامات:*\n` +
-        `• الرد على التحية تلقائياً\n` +
-        `• الرد على أسئلة شائعة\n` +
-        `• إرسال معلومات تلقائية\n` +
-        `• الرد على كلمات محددة\n\n` +
-        `اختر من القائمة:`,
-        { 
-            parse_mode: 'Markdown',
-            reply_markup: keyboard 
-        }
-    );
-}
-
-async function showAutoJoinMenu(chatId, adminId) {
-    // قائمة الانضمام التلقائي
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: '➕ تفعيل الانضمام', callback_data: 'autojoin_start' },
-                { text: '⏸️ إيقاف الانضمام', callback_data: 'autojoin_stop' }
-            ],
-            [
-                { text: '📊 إحصائيات الانضمام', callback_data: 'autojoin_stats' },
-                { text: '🔗 عرض الروابط', callback_data: 'links_whatsapp_group' }
-            ],
-            [
-                { text: '⚙️ إعدادات', callback_data: 'autojoin_settings' },
-                { text: '📝 سجلات الانضمام', callback_data: 'autojoin_logs' }
-            ],
-            [
-                { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-            ]
-        ]
-    };
-    
-    await bot.sendMessage(chatId,
-        `➕ *نظام الانضمام التلقائي*\n\n` +
-        `🚀 *المميزات:*\n` +
-        `• اكتشاف تلقائي لروابط واتساب\n` +
-        `• انضمام تلقائي للمجموعات\n` +
-        `• تقارير مفصلة عن الانضمام\n` +
-        `• إحصائيات في الوقت الفعلي\n\n` +
-        `💡 *كيفية العمل:*\n` +
-        `1. يراقب البوت جميع الرسائل\n` +
-        `2. يكتشف روابط دعوة واتساب\n` +
-        `3. ينضم للمجموعات تلقائياً\n` +
-        `4. يرسل تقريراً عن المجموعات\n` +
-        `5. يسجل المجموعات التي فشل الانضمام إليها\n\n` +
-        `🔧 *الإعدادات:*\n` +
-        `• تصفية المجموعات حسب الحجم\n` +
-        `• تحديد الكلمات المسموح بها\n` +
-        `• ضبط فترات الانضمام\n` +
-        `• إعدادات الإشعارات\n\n` +
-        `اختر من القائمة:`,
-        { 
-            parse_mode: 'Markdown',
-            reply_markup: keyboard 
-        }
-    );
-}
-
-async function showSettingsMenu(chatId, adminId) {
-    const admin = await Admin.findByPk(adminId);
-    
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: '🔔 الإشعارات', callback_data: 'settings_notifications' },
-                { text: '🌐 اللغة', callback_data: 'settings_language' }
-            ],
-            [
-                { text: '📱 حد الجلسات', callback_data: 'settings_max_sessions' },
-                { text: '🔗 تجميع الروابط', callback_data: 'settings_link_collection' }
-            ],
-            [
-                { text: '🤖 الرد التلقائي', callback_data: 'settings_auto_reply' },
-                { text: '➕ الانضمام التلقائي', callback_data: 'settings_auto_join' }
-            ],
-            [
-                { text: '📊 التقارير', callback_data: 'settings_reports' },
-                { text: '🔒 الأمان', callback_data: 'settings_security' }
-            ],
-            [
-                { text: '🔄 إعادة التعيين', callback_data: 'settings_reset' },
-                { text: '📋 معلومات الحساب', callback_data: 'settings_account' }
-            ],
-            [
-                { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-            ]
-        ]
-    };
-    
-    const message = `
-⚙️ *إعدادات النظام*
-
-👤 *معلومات الحساب:*
-• 🆔 المعرف: \`${admin.telegramId}\`
-• 👤 الاسم: ${admin.firstName || 'غير معروف'}
-• 💼 الصلاحيات: ${admin.permissions?.length || 0} صلاحية
-• 📅 تاريخ التسجيل: ${new Date(admin.createdAt).toLocaleDateString('ar-SA')}
-
-⚡ *الإعدادات الحالية:*
-• 🔔 الإشعارات: ${admin.settings?.notificationEnabled ? '✅ مفعلة' : '❌ معطلة'}
-• 🌐 اللغة: ${admin.settings?.language || 'العربية'}
-• 📱 الحد الأقصى للجلسات: ${admin.settings?.maxSessions || 5}
-• 🔗 تجميع الروابط: ${admin.settings?.autoCollectLinks ? '✅ مفعل' : '❌ معطل'}
-• 🤖 الرد التلقائي: ${admin.settings?.autoReplyEnabled ? '✅ مفعل' : '❌ معطل'}
-
-🔧 *خيارات الإعدادات:*
-• **🔔 الإشعارات:** التحكم في الإشعارات اليومية والفورية
-• **🌐 اللغة:** تغيير لغة واجهة البوت
-• **📱 حد الجلسات:** تحديد الحد الأقصى لعدد الجلسات
-• **🔗 تجميع الروابط:** تفعيل/تعطيل التجميع التلقائي
-• **🤖 الرد التلقائي:** إدارة نظام الردود التلقائية
-• **➕ الانضمام التلقائي:** إعدادات الانضمام للمجموعات
-• **📊 التقارير:** تخصيص التقارير والإحصائيات
-• **🔒 الأمان:** إعدادات الأمان والحماية
-• **🔄 إعادة التعيين:** إعادة تعيين الإعدادات للافتراضية
-• **📋 معلومات الحساب:** عرض وتعديل معلومات الحساب
-
-💡 *تلميح:* يمكنك تعديل أي إعداد بالنقر عليه
-    `;
-    
-    await bot.sendMessage(chatId, message, {
-        parse_mode: 'Markdown',
-        reply_markup: keyboard,
-        disable_web_page_preview: true
-    });
-}
-
-async function showHelpMenu(chatId, adminId) {
-    const keyboard = {
-        inline_keyboard: [
-            [
-                { text: '📚 الأوامر', callback_data: 'help_commands' },
-                { text: '📱 الجلسات', callback_data: 'help_sessions' }
-            ],
-            [
-                { text: '🔗 الروابط', callback_data: 'help_links' },
-                { text: '📢 الإعلانات', callback_data: 'help_ads' }
-            ],
-            [
-                { text: '🔄 النشر التلقائي', callback_data: 'help_autopost' },
-                { text: '➕ الانضمام', callback_data: 'help_autojoin' }
-            ],
-            [
-                { text: '🤖 الردود', callback_data: 'help_autoreply' },
-                { text: '📨 البث', callback_data: 'help_broadcast' }
-            ],
-            [
-                { text: '📊 الإحصائيات', callback_data: 'help_stats' },
-                { text: '⚙️ الإعدادات', callback_data: 'help_settings' }
-            ],
-            [
-                { text: '🆘 الدعم الفني', callback_data: 'help_support' },
-                { text: '📞 التواصل', callback_data: 'help_contact' }
-            ],
-            [
-                { text: '🏠 الرئيسية', callback_data: 'menu_main' }
-            ]
-        ]
-    };
-    
-    const message = `
-🆘 *مركز المساعدة والدعم*
-
-🤖 *عن البوت:*
-• **الاسم:** WhatsApp Telegram Bot
-• **الإصدار:** 2.0.0 - Render Optimized
-• **النوع:** نظام إدارة WhatsApp عبر Telegram
-• **الحالة:** ✅ نشط ومستقر
-
-🚀 *الميزات الرئيسية:*
-• 📱 *ربط حسابات WhatsApp كجهاز مصاحب*
-  - ربط متعدد للحسابات
-  - QR Code تلقائي
-  - إدارة مركزية
-
-• 🔗 *تجميع الروابع تلقائياً*
-  - اكتشاف ذكي للروابط
-  - تصنيف تلقائي
-  - منع التكرار
-
-• 📢 *نظام إعلانات متكامل*
-  - إعلانات نصية وصورية
-  - نشر تلقائي
-  - إحصائيات مفصلة
-
-• 🔄 *النشر التلقائي*
-  - نشر في جميع المجموعات
-  - توقيت قابل للتعديل
-  - استمرارية النشر
-
-• ➕ *الانضمام التلقائي*
-  - اكتشاف روابط واتساب
-  - انضمام تلقائي
-  - تقارير مفصلة
-
-• 🤖 *الردود التلقائية*
-  - ردود خاصة وجماعية
-  - محفزات نصية متقدمة
-  - إدارة متقدمة
-
-• 📊 *إحصائيات وتقارير*
-  - إحصائيات مفصلة
-  - تقارير أداء
-  - سجلات النشاطات
-
-🔧 *الدعم الفني:*
-• للأخطاء التقنية: تواصل مع المطور
-• للاستفسارات: راجع الأسئلة الشائعة
-• للاقتراحات: أرسل اقتراحك عبر زر التواصل
-
-📞 *التواصل:*
-• المطور: متاح عبر زر التواصل
-• القناة: قناة التحديثات والإعلانات
-• المجموعة: مجموعة الدعم والمناقشة
-
-⚡ *نصائح مهمة:*
-1. حافظ على تحديث البوت
-2. احتفظ بنسخة احتياطية من البيانات
-3. استخدم إعدادات الأمان
-4. راجع التقارير بانتظام
-
-اختر القسم الذي تريد مساعدة فيه:
-    `;
-    
-    await bot.sendMessage(chatId, message, {
-        parse_mode: 'Markdown',
-        reply_markup: keyboard,
-        disable_web_page_preview: true
-    });
-}
-
-// ============================================
-// 11. معالجات إضافية للأزرار
-// ============================================
-async function handleQRAction(chatId, userId, parts) {
-    const action = parts[1];
-    const sessionId = parts[2];
-    
-    switch (action) {
-        case 'help':
-            await bot.sendMessage(chatId,
-                `📱 *دليل الربط المصور*\n\n` +
-                `🚀 *الخطوات بالترتيب:*\n\n` +
-                `1. *افتح WhatsApp* على هاتفك\n` +
-                `2. *اضغط* على **النقاط الثلاث** (⋮)\n` +
-                `3. *اختر* **"الأجهزة المرتبطة"**\n` +
-                `4. *انقر* على **"ربط جهاز"**\n` +
-                `5. *وجه الكاميرا* نحو QR Code\n` +
-                `6. *انتظر* حتى تظهر رسالة التأكيد\n` +
-                `7. *انقر* على **"متابعة"**\n\n` +
-                `📝 *ملاحظات مهمة:*\n` +
-                `• تأكد من اتصال الهاتف بالإنترنت\n` +
-                `• قم بتقريب الكاميرا من QR Code\n` +
-                `• ⏱️ QR Code صالح لمدة 60 ثانية\n` +
-                `• 🔄 سيتم تجديده تلقائياً إذا انتهت\n\n` +
-                `❓ *مشاكل شائعة وحلولها:*\n` +
-                `• **الكاميرا لا تمسح:** جرب تقريب الهاتف أكثر\n` +
-                `• **QR غير صالح:** اطلب QR جديد\n` +
-                `• **لا يوجد خيار:** تأكد من تحديث WhatsApp\n\n` +
-                `✅ *بعد الربح الناجح:* ستصلك رسالة تأكيد`,
-                { parse_mode: 'Markdown' }
-            );
-            break;
-            
-        case 'regenerate':
-            // إعادة توليد QR Code
-            const session = await WhatsAppSession.findByPk(sessionId);
-            if (session) {
-                const client = whatsappClients.get(sessionId);
-                if (client) {
-                    // إعادة تهيئة العميل لتوليد QR جديد
-                    await client.destroy();
-                    await client.initialize();
-                    
-                    await bot.sendMessage(chatId,
-                        `🔄 *جاري توليد QR Code جديد...*\n\n` +
-                        `📱 الرقم: ${session.phoneNumber}\n` +
-                        `⏳ انتظر ثواني قليلة...`,
-                        { parse_mode: 'Markdown' }
-                    );
-                }
-            }
-            break;
-            
-        case 'cancel':
-            // إلغاء الجلسة
-            await cancelSession(sessionId, userId, chatId);
-            break;
-    }
-}
-
-async function cancelSession(sessionId, userId, chatId) {
-    try {
-        const session = await WhatsAppSession.findByPk(sessionId);
-        if (!session) return;
-        
-        // التحقق من أن المستخدم هو مالك الجلسة
-        const admin = await Admin.findOne({ where: { telegramId: userId } });
-        if (!admin || admin.id !== session.adminId) {
-            await bot.sendMessage(chatId,
-                '❌ *غير مصرح لك!*\n\n' +
-                'لا يمكنك إلغاء هذه الجلسة.',
-                { parse_mode: 'Markdown' }
-            );
-            return;
-        }
-        
-        // إغلاق العميل
-        const client = whatsappClients.get(sessionId);
-        if (client) {
-            await client.destroy();
-            whatsappClients.delete(sessionId);
-        }
-        
-        // تحديث حالة الجلسة
-        await session.update({
-            status: 'disconnected',
-            disconnectedAt: new Date()
-        });
-        
-        // مسح QR من الذاكرة
-        sessionQRs.delete(sessionId);
-        
-        await bot.sendMessage(chatId,
-            `✅ *تم إلغاء الجلسة بنجاح*\n\n` +
-            `📱 الرقم: ${session.phoneNumber}\n` +
-            `🆔 المعرف: ${sessionId.substring(0, 8)}\n` +
-            `⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n\n` +
-            `يمكنك إضافة جلسة جديدة باستخدام /addsession`,
-            { parse_mode: 'Markdown' }
-        );
-        
-        console.log(`✅ تم إلغاء الجلسة ${sessionId} بواسطة ${userId}`);
-        
-    } catch (error) {
-        console.error('❌ خطأ في إلغاء الجلسة:', error);
-        await bot.sendMessage(chatId, '❌ حدث خطأ في إلغاء الجلسة');
-    }
-}
-
-async function handlePhoneExample(chatId, userId, parts) {
-    if (parts[1] === 'example') {
-        const exampleNumber = parts[2];
-        await bot.sendMessage(chatId,
-            `📞 *مثال الرقم:* \`${exampleNumber}\`\n\n` +
-            `انسخ هذا الرقم وأرسله أو عدّل عليه حسب رقمك.\n\n` +
-            `💡 *تلميح:*\n` +
-            `• استبدل الأرقام الأخيرة برقم هاتفك\n` +
-            `• احتفظ برمز الدولة كما هو\n` +
-            `• لا تضيف مسافات أو رموز خاصة`,
-            { parse_mode: 'Markdown' }
-        );
-    }
-}
-
-async function handleCancelAction(chatId, userId, parts) {
-    const action = parts[1];
-    
-    switch (action) {
-        case 'add':
-            if (parts[2] === 'session') {
-                // إلغاء إضافة جلسة
-                userStates.delete(userId);
-                await bot.sendMessage(chatId,
-                    '❌ *تم إلغاء عملية إضافة الجلسة*\n\n' +
-                    'يمكنك البدء من جديد باستخدام /addsession',
-                    { parse_mode: 'Markdown' }
-                );
-            }
-            break;
-    }
-}
-
-// ============================================
-// 12. بدء التشغيل الرئيسي
-// ============================================
-async function startBot() {
-    console.log('\n' + '='.repeat(50));
-    console.log('🚀 بدء تشغيل WhatsApp Telegram Bot المتقدم');
-    console.log('='.repeat(50) + '\n');
-    
-    try {
-        // 1. إنشاء المجلدات الضرورية
-        console.log('📁 جاري إنشاء المجلدات...');
-        const folders = ['database', 'sessions', 'logs', 'temp'];
-        
-        for (const folder of folders) {
-            try {
-                await fs.mkdir(folder, { recursive: true });
-                console.log(`   ✅ ${folder}/`);
-            } catch (error) {
-                console.log(`   ⚠️ ${folder}/: ${error.message}`);
-            }
-        }
-        
-        // 2. تهيئة قاعدة البيانات
-        console.log('\n🗄️  جاري تهيئة قاعدة البيانات...');
-        const dbSuccess = await initializeDatabase();
-        if (!dbSuccess) {
-            console.error('❌ فشل تهيئة قاعدة البيانات!');
-            process.exit(1);
-        }
-        
-        // 3. بدء سيرفر Express
-        console.log('\n🌐 جاري تشغيل سيرفر الويب...');
-        const server = app.listen(PORT, () => {
-            console.log(`   ✅ السيرفر يعمل على: http://localhost:${PORT}`);
-            console.log(`   ✅ صفحة الصحة: http://localhost:${PORT}/health`);
-            console.log(`   ✅ صفحة الحالة: http://localhost:${PORT}/status`);
-        });
-        
-        // 4. إعداد معالجات الأخطاء للسيرفر
-        server.on('error', (error) => {
-            console.error('❌ خطأ في سيرفر الويب:', error);
-        });
-        
-        // 5. إعلام المشرفين
-        console.log('\n👥 جاري إعلام المشرفين...');
-        const adminIds = process.env.TELEGRAM_ADMIN_IDS ? 
-            process.env.TELEGRAM_ADMIN_IDS.split(',').map(id => id.trim()) : 
-            [];
-        
-        let notifiedCount = 0;
-        for (const adminId of adminIds) {
-            try {
-                await bot.sendMessage(adminId,
-                    '🚀 *البوت يعمل الآن!*\n\n' +
-                    '✅ *تم تشغيل WhatsApp Telegram Bot بنجاح.*\n\n' +
-                    '📋 *معلومات التشغيل:*\n' +
-                    `• 🏗️ Platform: ${process.env.NODE_ENV || 'development'}\n` +
-                    `• 🌐 Port: ${PORT}\n` +
-                    `• ⏰ الوقت: ${new Date().toLocaleTimeString('ar-SA')}\n` +
-                    `• 📅 التاريخ: ${new Date().toLocaleDateString('ar-SA')}\n\n` +
-                    '🚀 *المميزات الجاهزة:*\n' +
-                    '• 📱 ربط حسابات WhatsApp كجهاز مصاحب\n' +
-                    '• 🔗 تجميع الروابط تلقائياً\n' +
-                    '• 📢 نظام إعلانات متكامل\n' +
-                    '• 🤖 ردود تلقائية ذكية\n\n' +
-                    '⚡ *للبدء:* أرسل /start',
-                    { parse_mode: 'Markdown' }
-                );
-                notifiedCount++;
-                console.log(`   ✅ ${adminId}`);
-            } catch (error) {
-                console.log(`   ⚠️ ${adminId}: ${error.message}`);
-            }
-        }
-        
-        // 6. عرض رسالة النجاح
-        console.log('\n' + '='.repeat(50));
-        console.log('✅ ✅ ✅ البوت يعمل بنجاح! ✅ ✅ ✅');
-        console.log('='.repeat(50));
-        console.log('\n📋 *معلومات التشغيل:*');
-        console.log(`🤖 Telegram Bot: ✅ جاهز (${notifiedCount}/${adminIds.length} مشرف)`);
-        console.log(`📱 WhatsApp Manager: ✅ جاهز`);
-        console.log(`🗄️  Database: ✅ ${dbInitialized ? 'جاهزة' : 'غير جاهزة'}`);
-        console.log(`🌐 Web Server: ✅ جاهز (Port: ${PORT})`);
-        console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`📊 Memory Usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
-        console.log(`⏱️  Uptime: ${Math.floor(process.uptime())}s`);
-        console.log('\n' + '='.repeat(50));
-        console.log('⚡ *نصائح التشغيل:*');
-        console.log('• استخدم /start في بوت التليجرام للبدء');
-        console.log('• تابع الـ logs للاطلاع على الأحداث');
-        console.log('• تفقد صفحة /health لمراقبة الحالة');
-        console.log('• استخدم /help للحصول على المساعدة');
-        console.log('='.repeat(50) + '\n');
-        
-        // 7. بدء مراقبة الذاكرة
-        setInterval(() => {
-            const memoryUsage = process.memoryUsage();
-            const heapUsed = Math.round(memoryUsage.heapUsed / 1024 / 1024);
-            const heapTotal = Math.round(memoryUsage.heapTotal / 1024 / 1024);
-            
-            if (heapUsed > 500) { // 500MB حد تحذير
-                console.warn(`⚠️  تحذير: استخدام عالي للذاكرة: ${heapUsed}MB/${heapTotal}MB`);
-            }
-        }, 60000); // كل دقيقة
-        
-        return true;
-        
-    } catch (error) {
-        console.error('\n❌ ❌ ❌ فشل بدء التشغيل! ❌ ❌ ❌');
-        console.error('📋 الخطأ:', error);
-        console.error('\n🔧 *الأسباب المحتملة:*');
-        console.error('• توكن بوت التليجرام غير صالح');
-        console.error('• مشكلة في اتصال قاعدة البيانات');
-        console.error('• منفذ السيرفر مشغول مسبقاً');
-        console.error('• نقص في صلاحيات النظام');
-        console.error('\n🔄 *الحلول المقترحة:*');
-        console.error('1. تحقق من متغيرات البيئة');
-        console.error('2. تأكد من اتصال الإنترنت');
-        console.error('3. جرب تغيير منفذ السيرفر');
-        console.error('4. راجع الـ logs للحصول على تفاصيل أكثر');
-        
-        process.exit(1);
-    }
-}
-
-// ============================================
-// 13. التعامل مع الإيقاف النظيف
+// 8. التعامل مع الإيقاف النظيف
 // ============================================
 process.on('SIGINT', async () => {
     console.log('\n\n' + '='.repeat(50));
@@ -3749,30 +1803,11 @@ process.on('SIGINT', async () => {
     console.log('='.repeat(50));
     
     try {
-        // إرسال إشعار للمشرفين
-        const adminIds = process.env.TELEGRAM_ADMIN_IDS ? 
-            process.env.TELEGRAM_ADMIN_IDS.split(',').map(id => id.trim()) : 
-            [];
-        
-        for (const adminId of adminIds) {
-            try {
-                await bot.sendMessage(adminId,
-                    '⚠️ *البوت يتم إيقافه...*\n\n' +
-                    '🛑 تم تلقي إشارة إيقاف.\n' +
-                    '🔧 جاري الإغلاق النظيف...\n\n' +
-                    '⏰ الوقت: ' + new Date().toLocaleTimeString('ar-SA'),
-                    { parse_mode: 'Markdown' }
-                );
-            } catch (error) {
-                // تجاهل أخطاء الإرسال عند الإيقاف
-            }
-        }
-        
         // إغلاق جميع جلسات WhatsApp
         console.log('\n📱 جاري إغلاق جلسات WhatsApp...');
         let closedSessions = 0;
         
-        for (const [sessionId, client] of whatsappClients.entries()) {
+        for (const [sessionId, client] of global.whatsappClients.entries()) {
             try {
                 await client.destroy();
                 closedSessions++;
@@ -3795,7 +1830,7 @@ process.on('SIGINT', async () => {
         console.log('\n' + '='.repeat(50));
         console.log('✅ تم الإغلاق النظيف بنجاح!');
         console.log(`📊 الإحصائيات:`);
-        console.log(`• 📱 جلسات WhatsApp: ${closedSessions}/${whatsappClients.size}`);
+        console.log(`• 📱 جلسات WhatsApp: ${closedSessions}/${global.whatsappClients.size}`);
         console.log(`• 🗄️  قاعدة البيانات: مغلقة`);
         console.log(`• ⏱️  وقت التشغيل: ${Math.floor(process.uptime())} ثانية`);
         console.log('='.repeat(50) + '\n');
@@ -3809,21 +1844,10 @@ process.on('SIGINT', async () => {
 });
 
 // ============================================
-// 14. بدء التشغيل
-// ============================================
-if (require.main === module) {
-    startBot().catch(error => {
-        console.error('❌ فشل بدء التشغيل:', error);
-        process.exit(1);
-    });
-}
-
-// ============================================
-// 15. التصدير للاستخدام الخارجي
+// 9. تصدير الوحدات
 // ============================================
 module.exports = {
     app,
-    bot,
     sequelize,
     Admin,
     WhatsAppSession,
@@ -3833,15 +1857,25 @@ module.exports = {
     AutoReply,
     AutoJoin,
     Broadcast,
-    whatsappClients,
-    userStates,
-    activeAutoPosts,
-    activeAutoJoins,
-    sessionQRs,
-    messageQueues,
-    cooldownTimers,
-    dbInitialized,
+    
+    // دوال المساعدة
     initializeDatabase,
     createWhatsAppSession,
-    startBot
+    startWebServer,
+    startMaintenanceTasks,
+    
+    // دوال الحصول على المتغيرات العالمية
+    getWhatsAppClients: () => global.whatsappClients,
+    getUserStates: () => global.userStates,
+    getActiveAutoPosts: () => global.activeAutoPosts,
+    getActiveAutoJoins: () => global.activeAutoJoins,
+    getSessionQRs: () => global.sessionQRs,
+    getMessageQueues: () => global.messageQueues,
+    getCooldownTimers: () => global.cooldownTimers,
+    isDbInitialized: () => global.dbInitialized,
+    
+    // دوال التعيين
+    setTelegramBot: (bot) => { global.telegramBot = bot; },
+    setWhatsAppClients: (clients) => { global.whatsappClients = clients; },
+    setUserStates: (states) => { global.userStates = states; }
 };
