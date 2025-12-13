@@ -1,46 +1,155 @@
 {
   "name": "whatsapp-telegram-bot",
   "version": "3.0.0",
-  "description": "WhatsApp Telegram Bot with cleanup and merging capabilities",
+  "description": "نظام إدارة WhatsApp عبر Telegram مع ميزات متقدمة للتسويق والإدارة",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
+    "test": "jest --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.{js,json,md}\"",
+    "clean": "rm -rf node_modules package-lock.json",
     "cleanup": "node scripts/cleanup.js",
-    "analyze": "node scripts/cleanup.js --analyze",
-    "merge": "node scripts/cleanup.js --merge",
-    "backup": "node scripts/cleanup.js --backup",
-    "simplified": "node simplified-backup.js",
-    "test": "echo \"No tests yet\" && exit 0"
+    "cleanup:full": "node scripts/cleanup.js --full",
+    "migrate": "node scripts/migrate.js",
+    "migrate:status": "node scripts/migrate.js --status",
+    "migrate:rollback": "node scripts/migrate.js --rollback 1.0.0",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "seed": "node scripts/seed.js",
+    "docker:build": "docker build -t whatsapp-telegram-bot .",
+    "docker:run": "docker run -p 3000:3000 whatsapp-telegram-bot",
+    "docker:compose": "docker-compose up -d",
+    "docker:compose:down": "docker-compose down",
+    "docker:compose:logs": "docker-compose logs -f",
+    "docker:compose:restart": "docker-compose restart",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop whatsapp-bot",
+    "pm2:restart": "pm2 restart whatsapp-bot",
+    "pm2:logs": "pm2 logs whatsapp-bot",
+    "pm2:status": "pm2 status",
+    "pm2:monit": "pm2 monit",
+    "health": "node scripts/health.js",
+    "docs": "node scripts/generate-docs.js",
+    "stats": "node scripts/stats.js",
+    "audit": "node scripts/audit.js"
   },
   "keywords": [
     "whatsapp",
     "telegram",
     "bot",
+    "marketing",
     "automation",
-    "cleanup"
+    "arabic",
+    "management",
+    "multisession",
+    "qrcode",
+    "broadcast",
+    "autoreply"
   ],
-  "author": "Your Name",
+  "author": "WhatsApp Bot Team <support@whatsapp-bot.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/whatsapp-telegram-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/whatsapp-telegram-bot/issues"
+  },
+  "homepage": "https://github.com/yourusername/whatsapp-telegram-bot#readme",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "dependencies": {
-    "dotenv": "^16.0.3",
-    "express": "^4.18.2",
     "node-telegram-bot-api": "^0.61.0",
-    "whatsapp-web.js": "^1.21.0",
+    "whatsapp-web.js": "^1.23.0",
     "qrcode-terminal": "^0.12.0",
     "sequelize": "^6.32.1",
-    "sqlite3": "^5.1.6",
-    "pg": "^8.11.0",
-    "pg-hstore": "^2.3.4",
+    "mysql2": "^3.6.0",
+    "dotenv": "^16.3.1",
+    "crypto-js": "^4.1.1",
     "moment": "^2.29.4",
-    "axios": "^1.4.0",
+    "moment-timezone": "^0.5.43",
+    "axios": "^1.5.0",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "cors": "^2.8.5",
+    "compression": "^1.7.4",
+    "morgan": "^1.10.0",
+    "winston": "^3.10.0",
+    "joi": "^17.9.2",
+    "jsonwebtoken": "^9.0.2",
+    "bcryptjs": "^2.4.3",
+    "validator": "^13.9.0",
+    "lodash": "^4.17.21",
+    "chalk": "^4.1.2",
+    "figlet": "^1.6.0",
+    "cli-table3": "^0.6.3",
+    "progress": "^2.0.3",
     "node-cron": "^3.0.2",
-    "crypto": "^1.0.1"
+    "archiver": "^6.0.1",
+    "unzipper": "^0.10.14",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.32.6",
+    "fluent-ffmpeg": "^2.1.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.22"
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.4",
+    "supertest": "^6.3.3",
+    "eslint": "^8.48.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.28.1",
+    "prettier": "^3.0.3",
+    "@types/node": "^20.6.0",
+    "@types/jest": "^29.5.5",
+    "typescript": "^5.2.2",
+    "ts-node": "^10.9.1",
+    "husky": "^8.0.3",
+    "lint-staged": "^14.0.1",
+    "commitizen": "^4.3.0",
+    "cz-conventional-changelog": "^3.3.0"
   },
-  "engines": {
-    "node": ">=16.0.0"
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.json": [
+      "prettier --write"
+    ],
+    "*.md": [
+      "prettier --write"
+    ]
+  },
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged",
+      "pre-push": "npm test"
+    }
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "coveragePathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/",
+      "/logs/",
+      "/sessions/"
+    ],
+    "collectCoverageFrom": [
+      "**/*.js",
+      "!**/node_modules/**",
+      "!**/tests/**",
+      "!**/logs/**",
+      "!**/sessions/**"
+    ]
   }
 }
