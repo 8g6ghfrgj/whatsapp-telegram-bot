@@ -1,480 +1,222 @@
 # ============================================
-# 🚀 Render.com Configuration - WhatsApp Telegram Bot
-# الإصدار: 2.0.0 - Optimized for Production
+# 🚀 Render Deployment Configuration
 # ============================================
 
 services:
-  # ============================================
-  # 📱 الخدمة الرئيسية - WhatsApp Telegram Bot
-  # ============================================
+  # خدمة التطبيق الرئيسية
   - type: web
     name: whatsapp-telegram-bot
-    runtime: docker
-    repo: https://github.com/yourusername/whatsapp-telegram-bot
-    region: frankfurt  # أو أي region قريب منك
-    plan: starter  # أو professional للاستخدام المكثف
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
-    
-    # ============================================
-    # 🔧 إعدادات البناء
-    # ============================================
+    env: node
+    region: frankfurt  # أو أي منطقة قريبة منك
     buildCommand: |
-      echo "🚀 بدء بناء التطبيق..."
       npm ci --only=production
-      echo "✅ تم الانتهاء من البناء"
-    
-    startCommand: node index.js
-    
-    # ============================================
-    # ⚙️ إعدادات السيرفر
-    # ============================================
+      npm run migrate
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 3000
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: true
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: /usr/bin/chromium-browser
-      - key: DISABLE_SETUID_SANDBOX
-        value: 1
-      - key: NO_SANDBOX
-        value: 1
-      - key: MAX_OLD_SPACE_SIZE
-        value: 4096
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=4096
-    
-    # ============================================
-    # 🔐 متغيرات البيئة الحساسة (يتم تعيينها في Dashboard)
-    # ============================================
-    envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false
-      - key: TELEGRAM_ADMIN_IDS
+      - key: DB_HOST
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: host
+      - key: DB_PORT
+        value: 3306
+      - key: DB_NAME
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: whatsapp-bot-db
+          property: password
+      - key: DEFAULT_ADMIN_ID
         sync: false
-      - key: DATABASE_URL
-        sync: false
-      - key: DATABASE_SSL
-        value: true
       - key: SESSION_SECRET
         generateValue: true
       - key: ENCRYPTION_KEY
         generateValue: true
-    
-    # ============================================
-    # 💾 إعدادات التخزين
-    # ============================================
+      - key: PORT
+        value: 3000
+      - key: TZ
+        value: Asia/Riyadh
     disk:
-      name: whatsapp-data
-      mountPath: /app/data
-      sizeGB: 10
-    
-    # ============================================
-    # 🌐 إعدادات الشبكة
-    # ============================================
-    healthCheckPath: /health
+      name: sessions
+      mountPath: /opt/render/project/src/sessions
+      sizeGB: 1
+    disk:
+      name: logs
+      mountPath: /opt/render/project/src/logs
+      sizeGB: 1
+    plan: starter
     numInstances: 1
-    autoDeploy: true
-    
-    # ============================================
-    # 🔄 إعدادات النطاق الترددي
-    # ============================================
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /
-    
-    # ============================================
-    # 📊 إعدادات الموارد
-    # ============================================
-    resources:
-      memoryMB: 2048  # 2GB - ضروري لـ WhatsApp Web
-      cpu: 2
-      ephemeralStorageMB: 10240  # 10GB
-    
-    # ============================================
-    # 🔍 إعدادات المراقبة
-    # ============================================
-    observability:
-      logging:
-        enabled: true
-        retentionDays: 30
-      metrics:
-        enabled: true
-      traces:
-        enabled: true
-    
-    # ============================================
-    # 🛡️ إعدادات الأمان
-    # ============================================
-    security:
-      http:
-        forceHTTPS: true
-        hsts:
-          enabled: true
-          maxAge: 31536000
-          includeSubDomains: true
-          preload: true
-      headers:
-        - name: X-Content-Type-Options
-          value: nosniff
-        - name: X-Frame-Options
-          value: DENY
-        - name: X-XSS-Protection
-          value: 1; mode=block
-    
-    # ============================================
-    # ⏰ إعدادات الجدولة
-    # ============================================
-    schedules:
-      - name: daily-cleanup
-        schedule: "0 3 * * *"  # كل يوم الساعة 3 صباحاً
-        command: node scripts/cleanup.js
-      - name: daily-report
-        schedule: "0 9 * * *"  # كل يوم الساعة 9 صباحاً
-        command: node scripts/daily-report.js
-    
-    # ============================================
-    # 🚨 إعدادات التنبيهات
-    # ============================================
-    alerts:
-      - name: high-memory-usage
-        type: metrics
-        metric: memory_usage_percent
-        threshold: 80
-        duration: 5m
-        channels:
-          - email
-          - slack
-      - name: service-down
-        type: health
-        duration: 2m
-        channels:
-          - email
-          - sms
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 70
+      targetCPUPercent: 70
 
-# ============================================
-# 🗄️ قاعدة البيانات - PostgreSQL
-# ============================================
-databases:
-  - name: whatsapp-bot-db
-    databaseName: whatsapp_bot
-    user: whatsapp_bot_user
+  # قاعدة البيانات MySQL
+  - type: pserv
+    name: whatsapp-bot-db
+    env: docker
     region: frankfurt
-    plan: starter  # أو professional للإنتاج
-    
-    # ============================================
-    # 📈 إعدادات قاعدة البيانات
-    # ============================================
-    postgresql:
-      version: "15"
-    
-    # ============================================
-    # 🔒 إعدادات الأمان
-    # ============================================
+    disk:
+      name: data
+      mountPath: /var/lib/mysql
+      sizeGB: 10
+    dockerfilePath: ./docker/mysql.Dockerfile
+    envVars:
+      - key: MYSQL_ROOT_PASSWORD
+        generateValue: true
+      - key: MYSQL_DATABASE
+        value: whatsapp_bot
+      - key: MYSQL_USER
+        value: whatsapp_user
+      - key: MYSQL_PASSWORD
+        generateValue: true
+      - key: TZ
+        value: Asia/Riyadh
+    plan: starter
+    scaling:
+      minInstances: 1
+      maxInstances: 1
+
+  # خدمة Redis للذاكرة المؤقتة
+  - type: redis
+    name: whatsapp-bot-cache
+    region: frankfurt
     ipAllowList:
       - source: 0.0.0.0/0
-        description: "الوصول العام"
-    
-    # ============================================
-    # 💾 النسخ الاحتياطي
-    # ============================================
-    backup:
-      enabled: true
-      schedule: "0 2 * * *"  # كل يوم الساعة 2 صباحاً
-      retentionDays: 30
-    
-    # ============================================
-    # 📊 المراقبة
-    # ============================================
-    observability:
-      metrics:
-        enabled: true
-      logs:
-        enabled: true
-        retentionDays: 30
+        description: everywhere
+    maxmemoryPolicy: allkeys-lru
+    plan: starter
+    scaling:
+      minInstances: 1
+      maxInstances: 1
 
-# ============================================
-# 📁 إعدادات التخزين
-# ============================================
-disks:
-  - name: whatsapp-sessions
-    mountPath: /app/sessions
-    sizeGB: 5
-    attachedTo:
-      - whatsapp-telegram-bot
-  
-  - name: whatsapp-logs
-    mountPath: /app/logs
-    sizeGB: 2
-    attachedTo:
-      - whatsapp-telegram-bot
-  
-  - name: whatsapp-temp
-    mountPath: /app/temp
-    sizeGB: 3
-    attachedTo:
-      - whatsapp-telegram-bot
+  # خدمة Cron للصيانة
+  - type: cron
+    name: whatsapp-bot-maintenance
+    env: node
+    region: frankfurt
+    schedule: "0 2 * * *"  # يومياً الساعة 2 صباحاً
+    buildCommand: npm ci --only=production
+    startCommand: node scripts/maintenance.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromService:
+          type: pserv
+          name: whatsapp-bot-db
+          property: host
+      - key: DB_PORT
+        value: 3306
+      - key: DB_NAME
+        fromService:
+          type: pserv
+          name: whatsapp-bot-db
+          property: database
+      - key: DB_USER
+        fromService:
+          type: pserv
+          name: whatsapp-bot-db
+          property: user
+      - key: DB_PASSWORD
+        fromService:
+          type: pserv
+          name: whatsapp-bot-db
+          property: password
 
-# ============================================
-# 🔗 المتغيرات البيئية المشتركة
-# ============================================
-env:
-  # إعدادات التطبيق
-  APP_NAME: "WhatsApp Telegram Bot"
-  APP_VERSION: "2.0.0"
-  APP_LANGUAGE: "ar"
-  APP_TIMEZONE: "Asia/Riyadh"
-  
-  # إعدادات WhatsApp
-  WHATSAPP_VERSION: "2.0.0"
-  WHATSAPP_USER_AGENT: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  
-  # إعدادات الأداء
-  MAX_SESSIONS_PER_USER: "5"
-  MAX_MESSAGES_PER_DAY: "1000"
-  MAX_GROUPS_PER_DAY: "50"
-  
-  # إعدادات الأمان
-  SESSION_TIMEOUT: "3600"
-  MAX_LOGIN_ATTEMPTS: "5"
-  PASSWORD_MIN_LENGTH: "8"
-  
-  # إعدادات الصيانة
-  CLEANUP_INTERVAL: "86400"  # 24 ساعة
-  LOG_RETENTION_DAYS: "30"
-  BACKUP_INTERVAL: "86400"  # 24 ساعة
+# المتغيرات البيئية المشتركة
+envVarGroups:
+  - name: production
+    envVars:
+      - key: LOG_LEVEL
+        value: info
+      - key: WHATSAPP_TIMEOUT
+        value: "60000"
+      - key: WHATSAPP_MAX_SESSIONS
+        value: "5"
+      - key: AUTO_BACKUP
+        value: "true"
+      - key: CLEANUP_DAYS
+        value: "7"
+      - key: NOTIFY_ON_ERROR
+        value: "true"
 
-# ============================================
-# 📦 إعدادات البنية التحتية
-# ============================================
-infrastructure:
-  # إعدادات الشبكة
-  network:
-    type: public
-    ipWhitelist:
-      - 0.0.0.0/0
-    
-  # إعدادات التوازن
-  loadBalancer:
-    enabled: true
-    type: round-robin
-    stickySessions: true
-    
-  # إعدادات التخزين المؤقت
-  cache:
-    enabled: true
-    type: redis
-    sizeMB: 100
-    
-  # إعدادات CDN
-  cdn:
-    enabled: true
-    provider: cloudflare
+# إعدادات الشبكة
+networking:
+  - name: whatsapp-network
+    service: whatsapp-telegram-bot
+    type: private
 
-# ============================================
-# 📝 إعدادات النشر
-# ============================================
-deploy:
-  # إعدادات النشر التلقائي
-  autoDeploy:
-    enabled: true
-    branch: main
-    waitForChecks: true
-    
-  # إعدادات المراجعة
-  previews:
-    enabled: true
-    autoDestroy: true
-    ttlHours: 24
-    
-  # إعدادات التراجع
-  rollback:
-    enabled: true
-    automatic: true
-    threshold: 5  # نسبة الأخطاء للتراجع التلقائي
-    
-  # إعدادات الاختبار
-  tests:
-    enabled: true
+# سياسات النشر
+deployHooks:
+  - name: Run Migrations
+    type: pre-deploy
+    command: npm run migrate
+    service: whatsapp-telegram-bot
+  - name: Run Tests
+    type: pre-deploy
     command: npm test
-    timeout: 300
+    service: whatsapp-telegram-bot
+  - type: post-deploy
+    name: Health Check
+    command: |
+      sleep 30
+      curl -f http://localhost:$PORT/health || exit 1
+    service: whatsapp-telegram-bot
 
-# ============================================
-# 🔍 إعدادات المراقبة
-# ============================================
-monitoring:
-  # مراقبة الأداء
-  performance:
-    enabled: true
-    metrics:
-      - cpu
-      - memory
-      - disk
-      - network
-    
-  # مراقبة التطبيق
-  application:
-    enabled: true
-    endpoints:
-      - path: /health
-        interval: 30
-        timeout: 5
-      - path: /status
-        interval: 60
-        timeout: 10
-    
-  # مراقبة السجلات
-  logs:
-    enabled: true
-    retention: 30d
-    filters:
-      - level: error
-      - level: warning
-        
-  # مراقبة قاعدة البيانات
-  database:
-    enabled: true
-    queries:
-      slowQueryThreshold: 1000  # ملي ثانية
-      trackConnections: true
+# المراقبة والتنبيهات
+alerts:
+  - type: latency
+    threshold: 2000ms
+    window: 5m
+    service: whatsapp-telegram-bot
+  - type: error_rate
+    threshold: 5%
+    window: 5m
+    service: whatsapp-telegram-bot
+  - type: downtime
+    service: whatsapp-telegram-bot
+  - type: cpu
+    threshold: 80%
+    window: 5m
+    service: whatsapp-telegram-bot
+  - type: memory
+    threshold: 80%
+    window: 5m
+    service: whatsapp-telegram-bot
 
-# ============================================
-# 🛡️ إعدادات الأمان المتقدمة
-# ============================================
-security:
-  # جدران الحماية
-  firewall:
-    enabled: true
-    rules:
-      - port: 3000
-        protocol: tcp
-        source: 0.0.0.0/0
-      - port: 5432
-        protocol: tcp
-        source: whatsapp-telegram-bot
-    
-  # تشفير البيانات
-  encryption:
-    enabled: true
-    algorithm: aes-256-gcm
-    
-  # التحقق من الهوية
-  authentication:
-    enabled: true
-    method: jwt
-    expiry: 24h
-    
-  # التحكم في الوصول
-  accessControl:
-    enabled: true
-    policies:
-      - resource: "/admin/*"
-        role: admin
-      - resource: "/api/*"
-        role: user
-
-# ============================================
-# 📈 إعدادات التحجيم التلقائي
-# ============================================
-autoscaling:
-  enabled: true
-  minInstances: 1
-  maxInstances: 3
-  metrics:
-    - type: cpu
-      threshold: 70
-      duration: 5m
-    - type: memory
-      threshold: 80
-      duration: 5m
-    - type: requests
-      threshold: 100
-      duration: 2m
-
-# ============================================
-# 📊 إعدادات التقارير
-# ============================================
-reporting:
-  daily:
-    enabled: true
-    time: "09:00"
-    recipients:
-      - email: admin@example.com
-    
-  weekly:
-    enabled: true
-    day: monday
-    time: "10:00"
-    
-  monthly:
-    enabled: true
-    day: 1
-    time: "11:00"
-
-# ============================================
-# 🔄 إعدادات النسخ الاحتياطي
-# ============================================
-backup:
-  database:
-    enabled: true
+# النسخ الاحتياطي لقاعدة البيانات
+backups:
+  - name: daily-backup
     schedule: "0 2 * * *"
-    retention: 30
-    
-  sessions:
-    enabled: true
-    schedule: "0 3 * * *"
-    retention: 7
-    
-  logs:
-    enabled: true
-    schedule: "0 4 * * *"
-    retention: 90
+    database: whatsapp-bot-db
+    retentionDays: 7
+  - name: weekly-backup
+    schedule: "0 2 * * 0"
+    database: whatsapp-bot-db
+    retentionDays: 30
+  - name: monthly-backup
+    schedule: "0 2 1 * *"
+    database: whatsapp-bot-db
+    retentionDays: 365
 
-# ============================================
-# 💰 إعدادات الفوترة
-# ============================================
-billing:
-  alertThresholds:
-    - amount: 50
-      currency: USD
-    - amount: 100
-      currency: USD
-    - amount: 200
-      currency: USD
-    
-  notifications:
-    enabled: true
-    frequency: weekly
-
-# ============================================
-# 📋 ملاحظات النشر
-# ============================================
-notes: |
-  📝 تعليمات النشر على Render.com:
-  
-  1. **الخطوة الأولى**: انسخ محتوى هذا الملف إلى `render.yaml` في مشروعك
-  2. **الخطوة الثانية**: ادفع الكود إلى GitHub
-  3. **الخطوة الثالثة**: سجل الدخول إلى render.com وأنشئ مشروعاً جديداً
-  4. **الخطوة الرابعة**: اختر "Deploy from Git Repository"
-  5. **الخطوة الخامسة**: اختر مستودع GitHub الخاص بك
-  6. **الخطوة السادسة**: اضغط على "Apply" وسيبدأ النشر تلقائياً
-  
-  ⚠️ **ملاحظات مهمة**:
-  - تأكد من تعيين جميع متغيرات البيئة في Dashboard
-  - تأكد من أن لديك خططاً كافية للـ Memory والـ CPU
-  - استخدم PostgreSQL للإنتاج، SQLite للتطوير فقط
-  - شغل Health Check على `/health`
-  
-  🔧 **متغيرات البيئة المطلوبة**:
-  - TELEGRAM_BOT_TOKEN: توكن بوت Telegram
-  - TELEGRAM_ADMIN_IDS: قائمة معرفات المشرفين (مفصولة بفواصل)
-  - DATABASE_URL: رابط قاعدة البيانات PostgreSQL
-  
-  📞 **للحصول على مساعدة**:
-  - راجع ملف README.md
-  - تواصل عبر Issues في GitHub
-  - استخدم قناة Telegram للدعم
+# المجلدات المرفقة
+volumes:
+  - name: sessions
+    mountPath: /opt/render/project/src/sessions
+    sizeGB: 1
+  - name: logs
+    mountPath: /opt/render/project/src/logs
+    sizeGB: 1
