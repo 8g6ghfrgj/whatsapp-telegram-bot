@@ -1,1926 +1,2292 @@
 // ============================================
-// 📁 قاعدة البيانات - تعريف النماذج (Models)
-// الإصدار: 2.0.0 - Render Optimized
+// 🗄️ WhatsApp Bot Models
+// نماذج قاعدة البيانات كاملة
 // ============================================
 
-const { Sequelize, DataTypes, Op } = require('sequelize');
+const { DataTypes } = require('sequelize');
 
-// استيراد sequelize من الملف الرئيسي
-const sequelize = require('./index').sequelize;
-
-// ============================================
-// 1. نموذج المشرفين المحسن
-// ============================================
-const Admin = sequelize.define('Admin', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للمشرف'
-    },
-    telegramId: { 
-        type: DataTypes.STRING, 
-        unique: true, 
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'معرف المستخدم في تليجرام'
-    },
-    username: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'اسم المستخدم في تليجرام'
-    },
-    firstName: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'الاسم الأول'
-    },
-    lastName: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'الاسم الأخير'
-    },
-    phoneNumber: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        validate: {
-            is: /^\+?[1-9]\d{1,14}$/
-        },
-        comment: 'رقم الهاتف (اختياري)'
-    },
-    isActive: { 
-        type: DataTypes.BOOLEAN, 
-        defaultValue: true,
-        comment: 'حالة الحساب (نشط/معطل)'
-    },
-    permissions: { 
-        type: DataTypes.JSON, 
-        defaultValue: ['basic'],
-        comment: 'قائمة الصلاحيات'
-    },
-    settings: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            autoCollectLinks: true,
-            autoReplyEnabled: true,
-            maxSessions: 5,
-            notificationEnabled: true,
-            language: 'ar',
-            timezone: 'Asia/Riyadh',
-            reportFrequency: 'daily',
-            autoJoinEnabled: false,
-            maxAutoJoinsPerDay: 10,
-            broadcastDelay: 1000,
-            adPostingDelay: 2000
-        },
-        comment: 'إعدادات المستخدم الشخصية'
-    },
-    lastActivity: {
-        type: DataTypes.DATE,
-        defaultValue: DataTypes.NOW,
-        comment: 'آخر نشاط للمستخدم'
-    },
-    lastLogin: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'آخر مرة قام فيها بتسجيل الدخول'
-    },
-    loginCount: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        comment: 'عدد مرات تسجيل الدخول'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+class WhatsAppModels {
+    constructor(sequelize) {
+        this.sequelize = sequelize;
+        this.models = {};
+        this.initModels();
     }
-}, {
-    timestamps: true,
-    tableName: 'admins',
-    indexes: [
-        { fields: ['telegramId'] },
-        { fields: ['isActive'] },
-        { fields: ['lastActivity'] },
-        { fields: ['createdAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (admin, options) => {
-            admin.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 1. تهيئة جميع النماذج
+    // ============================================
+    initModels() {
+        console.log('🗄️ جاري تهيئة نماذج قاعدة البيانات...');
+
+        this.models.Admin = this.initAdminModel();
+        this.models.WhatsAppSession = this.initWhatsAppSessionModel();
+        this.models.CollectedLink = this.initCollectedLinkModel();
+        this.models.Advertisement = this.initAdvertisementModel();
+        this.models.AutoPost = this.initAutoPostModel();
+        this.models.AutoReply = this.initAutoReplyModel();
+        this.models.AutoJoin = this.initAutoJoinModel();
+        this.models.Broadcast = this.initBroadcastModel();
+        this.models.Notification = this.initNotificationModel();
+        this.models.ActivityLog = this.initActivityLogModel();
+        this.models.Archive = this.initArchiveModel();
+        this.models.LoginAttempt = this.initLoginAttemptModel();
+        this.models.SystemLog = this.initSystemLogModel();
+        this.models.Backup = this.initBackupModel();
+
+        console.log(`✅ تم تهيئة ${Object.keys(this.models).length} نموذج`);
+        
+        // إعداد العلاقات بين النماذج
+        this.setupAssociations();
+        
+        console.log('✅ تم إعداد العلاقات بين النماذج');
     }
-});
 
-// ============================================
-// 2. نموذج جلسات واتساب المحسن
-// ============================================
-const WhatsAppSession = sequelize.define('WhatsAppSession', {
-    id: { 
-        type: DataTypes.STRING, 
-        primaryKey: true,
-        comment: 'معرف الجلسة الفريد'
-    },
-    sessionId: { 
-        type: DataTypes.STRING, 
-        unique: true,
-        comment: 'معرف الجلسة في نظام WhatsApp'
-    },
-    phoneNumber: { 
-        type: DataTypes.STRING, 
-        allowNull: false,
-        validate: {
-            notEmpty: true,
-            is: /^\+?[1-9]\d{1,14}$/
-        },
-        comment: 'رقم الهاتف المرتبط بالحساب'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    sessionData: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'بيانات الجلسة المشفرة'
-    },
-    status: { 
-        type: DataTypes.ENUM(
-            'pending', 
-            'awaiting_qr', 
-            'connected', 
-            'disconnected', 
-            'error',
-            'authenticated',
-            'loading',
-            'terminated'
-        ),
-        defaultValue: 'pending',
-        comment: 'حالة الجلسة الحالية'
-    },
-    qrCode: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'كود QR الحالي'
-    },
-    qrSentAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ إرسال آخر QR'
-    },
-    qrAttempts: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        comment: 'عدد محاولات توليد QR'
-    },
-    connectionData: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            platform: 'unknown',
-            phone: {},
-            pushname: '',
-            wid: '',
-            me: {},
-            battery: null,
-            platform: '',
-            locale: '',
-            isBusiness: false
-        },
-        comment: 'بيانات الاتصال والجهاز'
-    },
-    lastActivity: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'آخر نشاط للجلسة'
-    },
-    connectedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ الاتصال الناجح'
-    },
-    disconnectedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ فقدان الاتصال'
-    },
-    groupsCount: { 
-        type: DataTypes.INTEGER, 
-        defaultValue: 0,
-        comment: 'عدد المجموعات'
-    },
-    contactsCount: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        comment: 'عدد جهات الاتصال'
-    },
-    stats: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            messagesReceived: 0,
-            messagesSent: 0,
-            groupsJoined: 0,
-            linksCollected: 0,
-            adsPosted: 0,
-            broadcastsSent: 0,
-            autoRepliesTriggered: 0,
-            errors: 0,
-            uptime: 0,
-            lastMessageAt: null,
-            peakActivity: null
-        },
-        comment: 'إحصائيات الجلسة'
-    },
-    settings: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            autoReply: true,
-            autoCollect: true,
-            autoJoin: false,
-            broadcastEnabled: true,
-            adPostingEnabled: true,
-            notificationEnabled: true,
-            maxGroupsPerDay: 50,
-            maxMessagesPerDay: 1000,
-            autoLeaveInactiveGroups: false,
-            leaveAfterDays: 30,
-            safetyMode: true,
-            spamProtection: true
-        },
-        comment: 'إعدادات الجلسة'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            createdFrom: 'telegram_bot',
-            platform: 'render',
-            userAgent: 'WhatsApp-Bot/2.0.0',
-            version: '2.0.0',
-            features: [],
-            restrictions: [],
-            tags: []
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    isActive: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        comment: 'هل الجلسة نشطة؟'
-    },
-    lastHealthCheck: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'آخر فحص صحة للجلسة'
-    },
-    healthStatus: {
-        type: DataTypes.ENUM('healthy', 'warning', 'critical', 'unknown'),
-        defaultValue: 'unknown',
-        comment: 'حالة صحة الجلسة'
-    },
-    errorLogs: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'سجلات الأخطاء'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 2. نموذج المشرفين
+    // ============================================
+    initAdminModel() {
+        return this.sequelize.define('Admin', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `admin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            telegramId: {
+                type: DataTypes.STRING(50),
+                allowNull: false,
+                unique: true,
+                field: 'telegram_id',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            username: {
+                type: DataTypes.STRING(100),
+                allowNull: true,
+                validate: {
+                    len: [3, 100]
+                }
+            },
+            firstName: {
+                type: DataTypes.STRING(100),
+                allowNull: false,
+                defaultValue: 'مشرف',
+                field: 'first_name',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            lastName: {
+                type: DataTypes.STRING(100),
+                allowNull: true,
+                field: 'last_name'
+            },
+            phoneNumber: {
+                type: DataTypes.STRING(20),
+                allowNull: true,
+                field: 'phone_number',
+                validate: {
+                    is: /^\+?[1-9]\d{1,14}$/
+                }
+            },
+            email: {
+                type: DataTypes.STRING(100),
+                allowNull: true,
+                validate: {
+                    isEmail: true
+                }
+            },
+            permissions: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: ['manage_sessions', 'manage_ads', 'view_stats'],
+                validate: {
+                    isArray(value) {
+                        if (!Array.isArray(value)) {
+                            throw new Error('يجب أن تكون الصلاحيات مصفوفة');
+                        }
+                    }
+                }
+            },
+            settings: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    notificationEnabled: true,
+                    language: 'ar',
+                    maxSessions: 10,
+                    autoCollectLinks: true,
+                    autoReplyEnabled: true,
+                    theme: 'light',
+                    timezone: 'Asia/Riyadh',
+                    autoBackup: true,
+                    backupFrequency: 'daily'
+                },
+                validate: {
+                    isObject(value) {
+                        if (typeof value !== 'object' || value === null) {
+                            throw new Error('يجب أن تكون الإعدادات كائن');
+                        }
+                    }
+                }
+            },
+            lastActivity: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_activity'
+            },
+            isActive: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: true,
+                field: 'is_active'
+            },
+            isSuperAdmin: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false,
+                field: 'is_super_admin'
+            },
+            twoFactorEnabled: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false,
+                field: 'two_factor_enabled'
+            },
+            twoFactorSecret: {
+                type: DataTypes.STRING(100),
+                allowNull: true,
+                field: 'two_factor_secret'
+            },
+            lastPasswordChange: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_password_change'
+            },
+            failedLoginAttempts: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+                field: 'failed_login_attempts'
+            },
+            accountLockedUntil: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'account_locked_until'
+            },
+            commissionRate: {
+                type: DataTypes.DECIMAL(5, 2),
+                allowNull: false,
+                defaultValue: 0.00,
+                field: 'commission_rate'
+            },
+            totalEarnings: {
+                type: DataTypes.DECIMAL(10, 2),
+                allowNull: false,
+                defaultValue: 0.00,
+                field: 'total_earnings'
+            },
+            lastPaymentDate: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_payment_date'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'admins',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    unique: true,
+                    fields: ['telegram_id']
+                },
+                {
+                    fields: ['is_active']
+                },
+                {
+                    fields: ['is_super_admin']
+                },
+                {
+                    fields: ['last_activity']
+                },
+                {
+                    fields: ['created_at']
+                }
+            ],
+            hooks: {
+                beforeCreate: (admin) => {
+                    if (!admin.firstName.trim()) {
+                        admin.firstName = 'مشرف';
+                    }
+                },
+                beforeUpdate: (admin) => {
+                    admin.updatedAt = new Date();
+                }
+            }
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'whatsapp_sessions',
-    indexes: [
-        { fields: ['adminId'] },
-        { fields: ['status'] },
-        { fields: ['phoneNumber'] },
-        { fields: ['createdAt'] },
-        { fields: ['lastActivity'] },
-        { fields: ['isActive'] },
-        { fields: ['healthStatus'] }
-    ],
-    hooks: {
-        beforeUpdate: (session, options) => {
-            session.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 3. نموذج جلسات WhatsApp
+    // ============================================
+    initWhatsAppSessionModel() {
+        return this.sequelize.define('WhatsAppSession', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `wa_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            sessionId: {
+                type: DataTypes.STRING(100),
+                allowNull: false,
+                unique: true,
+                field: 'session_id',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            phoneNumber: {
+                type: DataTypes.STRING(20),
+                allowNull: false,
+                field: 'phone_number',
+                validate: {
+                    notEmpty: true,
+                    is: /^\+?[1-9]\d{1,14}$/
+                }
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'awaiting_qr',
+                    'connected',
+                    'authenticated',
+                    'disconnected',
+                    'error',
+                    'initializing',
+                    'reconnecting'
+                ),
+                allowNull: false,
+                defaultValue: 'awaiting_qr',
+                validate: {
+                    isIn: [['awaiting_qr', 'connected', 'authenticated', 'disconnected', 'error', 'initializing', 'reconnecting']]
+                }
+            },
+            qrCode: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                field: 'qr_code'
+            },
+            qrSentAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'qr_sent_at'
+            },
+            connectedAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'connected_at'
+            },
+            disconnectedAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'disconnected_at'
+            },
+            groupsCount: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+                field: 'groups_count',
+                validate: {
+                    min: 0
+                }
+            },
+            contactsCount: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+                field: 'contacts_count',
+                validate: {
+                    min: 0
+                }
+            },
+            connectionData: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                field: 'connection_data'
+            },
+            settings: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    autoReply: true,
+                    autoCollect: true,
+                    autoJoin: false,
+                    broadcastEnabled: true,
+                    autoReconnect: true,
+                    maxReconnectAttempts: 3,
+                    reconnectInterval: 5000,
+                    collectInterval: 3600000,
+                    autoLeaveInactive: false,
+                    inactiveDaysThreshold: 30,
+                    maxGroupsPerDay: 50,
+                    maxMessagesPerDay: 1000
+                }
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    messagesReceived: 0,
+                    messagesSent: 0,
+                    linksCollected: 0,
+                    groupsJoined: 0,
+                    groupsLeft: 0,
+                    mediaReceived: 0,
+                    mediaSent: 0,
+                    errors: 0,
+                    lastError: null,
+                    uptime: 0,
+                    lastRestart: null
+                }
+            },
+            lastActivity: {
+                type: DataTypes.DATE,
+                allowNull: false,
+                defaultValue: DataTypes.NOW,
+                field: 'last_activity'
+            },
+            encryptedData: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                field: 'encrypted_data'
+            },
+            encryptionKey: {
+                type: DataTypes.STRING(255),
+                allowNull: true,
+                field: 'encryption_key'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'whatsapp_sessions',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    unique: true,
+                    fields: ['session_id']
+                },
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['phone_number']
+                },
+                {
+                    fields: ['connected_at']
+                },
+                {
+                    fields: ['last_activity']
+                }
+            ],
+            hooks: {
+                beforeCreate: (session) => {
+                    if (!session.sessionId) {
+                        session.sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                    }
+                },
+                afterUpdate: async (session) => {
+                    // تحديث آخر نشاط
+                    if (session.changed('status') && session.status === 'connected') {
+                        session.lastActivity = new Date();
+                    }
+                }
+            }
+        });
     }
-});
 
-// ============================================
-// 3. نموذج الروابط المجمعة المحسن
-// ============================================
-const CollectedLink = sequelize.define('CollectedLink', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للرابط'
-    },
-    url: { 
-        type: DataTypes.STRING, 
-        unique: true, 
-        allowNull: false,
-        validate: {
-            notEmpty: true,
-            isUrl: true
-        },
-        comment: 'الرابط الفعلي'
-    },
-    type: { 
-        type: DataTypes.ENUM(
-            'whatsapp_group', 
-            'whatsapp_invite', 
-            'telegram', 
-            'website', 
-            'other',
-            'whatsapp_channel',
-            'discord',
-            'signal',
-            'facebook',
-            'instagram',
-            'twitter',
-            'youtube',
-            'tiktok',
-            'linkedin'
-        ),
-        defaultValue: 'other',
-        comment: 'نوع الرابط'
-    },
-    title: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'عنوان الرابط'
-    },
-    description: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'وصف الرابط'
-    },
-    source: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'المصدر الذي تم جمع الرابط منه'
-    },
-    sessionId: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'معرف الجلسة التي جمعت الرابط'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            groupName: '',
-            groupSize: 0,
-            isActive: true,
-            lastChecked: null,
-            category: '',
-            language: '',
-            country: '',
-            membersCount: 0,
-            isVerified: false,
-            description: '',
-            icon: '',
-            tags: [],
-            qualityScore: 0
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    status: {
-        type: DataTypes.ENUM('active', 'expired', 'invalid', 'joined', 'pending', 'blocked'),
-        defaultValue: 'active',
-        comment: 'حالة الرابط'
-    },
-    collectedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ جمع الرابط'
-    },
-    lastChecked: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ آخر فحص للرابط'
-    },
-    checkCount: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        comment: 'عدد مرات فحص الرابط'
-    },
-    successRate: {
-        type: DataTypes.FLOAT,
-        defaultValue: 0,
-        validate: {
-            min: 0,
-            max: 100
-        },
-        comment: 'معدل نجاح الرابط (%)'
-    },
-    tags: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'وسوم الرابط للتصنيف'
-    },
-    priority: {
-        type: DataTypes.INTEGER,
-        defaultValue: 1,
-        validate: {
-            min: 1,
-            max: 10
-        },
-        comment: 'أولوية الرابط (1-10)'
-    },
-    isArchived: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-        comment: 'هل الرابط مؤرشف؟'
-    },
-    archiveReason: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'سبب الأرشفة'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 4. نموذج الروابط المجمعة
+    // ============================================
+    initCollectedLinkModel() {
+        return this.sequelize.define('CollectedLink', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `link_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            url: {
+                type: DataTypes.STRING(500),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    isUrl: true
+                }
+            },
+            type: {
+                type: DataTypes.ENUM(
+                    'whatsapp_group',
+                    'whatsapp_invite',
+                    'telegram',
+                    'discord',
+                    'signal',
+                    'website',
+                    'youtube',
+                    'instagram',
+                    'facebook',
+                    'twitter',
+                    'tiktok',
+                    'other'
+                ),
+                allowNull: false,
+                defaultValue: 'other',
+                validate: {
+                    isIn: [['whatsapp_group', 'whatsapp_invite', 'telegram', 'discord', 'signal', 'website', 'youtube', 'instagram', 'facebook', 'twitter', 'tiktok', 'other']]
+                }
+            },
+            title: {
+                type: DataTypes.STRING(255),
+                allowNull: true,
+                validate: {
+                    len: [0, 255]
+                }
+            },
+            description: {
+                type: DataTypes.TEXT,
+                allowNull: true
+            },
+            source: {
+                type: DataTypes.STRING(255),
+                allowNull: true
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'active',
+                    'inactive',
+                    'joined',
+                    'failed',
+                    'pending',
+                    'expired',
+                    'banned'
+                ),
+                allowNull: false,
+                defaultValue: 'active',
+                validate: {
+                    isIn: [['active', 'inactive', 'joined', 'failed', 'pending', 'expired', 'banned']]
+                }
+            },
+            collectedAt: {
+                type: DataTypes.DATE,
+                allowNull: false,
+                defaultValue: DataTypes.NOW,
+                field: 'collected_at'
+            },
+            lastChecked: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_checked'
+            },
+            checkCount: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+                field: 'check_count',
+                validate: {
+                    min: 0
+                }
+            },
+            category: {
+                type: DataTypes.STRING(100),
+                allowNull: true
+            },
+            qualityScore: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 50,
+                field: 'quality_score',
+                validate: {
+                    min: 0,
+                    max: 100
+                }
+            },
+            lastActivityScore: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 0,
+                field: 'last_activity_score',
+                validate: {
+                    min: 0,
+                    max: 100
+                }
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'collected_links',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    unique: true,
+                    fields: ['url']
+                },
+                {
+                    fields: ['type']
+                },
+                {
+                    fields: ['session_id']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['collected_at']
+                },
+                {
+                    fields: ['category']
+                },
+                {
+                    fields: ['quality_score']
+                },
+                {
+                    fields: ['source']
+                }
+            ],
+            hooks: {
+                beforeCreate: (link) => {
+                    if (!link.url.startsWith('http')) {
+                        link.url = 'https://' + link.url;
+                    }
+                    
+                    // تصنيف تلقائي بناءً على الرابط
+                    if (!link.type || link.type === 'other') {
+                        link.type = this.classifyLinkType(link.url);
+                    }
+                    
+                    if (!link.title && link.url) {
+                        link.title = this.generateLinkTitle(link.url);
+                    }
+                },
+                beforeUpdate: (link) => {
+                    if (link.changed('status') && link.status === 'active') {
+                        link.lastChecked = new Date();
+                        link.checkCount += 1;
+                    }
+                }
+            }
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'collected_links',
-    indexes: [
-        { fields: ['type'] },
-        { fields: ['sessionId'] },
-        { fields: ['collectedAt'] },
-        { fields: ['status'] },
-        { fields: ['priority'] },
-        { fields: ['isArchived'] },
-        { fields: ['tags'], using: 'gin' }
-    ],
-    hooks: {
-        beforeUpdate: (link, options) => {
-            link.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 5. نموذج الإعلانات
+    // ============================================
+    initAdvertisementModel() {
+        return this.sequelize.define('Advertisement', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `ad_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            type: {
+                type: DataTypes.ENUM(
+                    'text',
+                    'image',
+                    'video',
+                    'contact',
+                    'document',
+                    'location',
+                    'poll'
+                ),
+                allowNull: false,
+                defaultValue: 'text',
+                validate: {
+                    isIn: [['text', 'image', 'video', 'contact', 'document', 'location', 'poll']]
+                }
+            },
+            content: {
+                type: DataTypes.TEXT('long'),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            mediaUrl: {
+                type: DataTypes.STRING(500),
+                allowNull: true,
+                field: 'media_url',
+                validate: {
+                    isUrl: true
+                }
+            },
+            mediaType: {
+                type: DataTypes.STRING(50),
+                allowNull: true,
+                field: 'media_type'
+            },
+            mediaSize: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                field: 'media_size',
+                validate: {
+                    min: 0
+                }
+            },
+            target: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    allGroups: true,
+                    specificGroups: [],
+                    minMembers: 0,
+                    maxMembers: 1000000,
+                    allowedCountries: [],
+                    excludedCountries: [],
+                    schedule: 'anytime',
+                    ageRange: [18, 65],
+                    gender: 'any'
+                }
+            },
+            schedule: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    startTime: null,
+                    endTime: null,
+                    repeat: false,
+                    interval: 3600,
+                    daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                    timezone: 'Asia/Riyadh'
+                }
+            },
+            settings: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    delayBetweenGroups: 1000,
+                    retryFailed: true,
+                    optimizeSending: true,
+                    maxRetries: 3,
+                    shuffleGroups: false,
+                    skipInactive: true,
+                    inactiveThreshold: 7,
+                    requireConfirmation: false,
+                    confirmationMessage: 'هل تريد نشر الإعلان؟'
+                }
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    sent: 0,
+                    failed: 0,
+                    lastSent: null,
+                    successRate: 0,
+                    clicks: 0,
+                    views: 0,
+                    conversions: 0,
+                    costPerMessage: 0.0000,
+                    totalCost: 0.00,
+                    roi: 0.00,
+                    engagementRate: 0.00,
+                    bySession: {},
+                    byGroup: {},
+                    byTime: {}
+                }
+            },
+            isActive: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: true,
+                field: 'is_active'
+            },
+            priority: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 5,
+                validate: {
+                    min: 1,
+                    max: 10
+                }
+            },
+            budget: {
+                type: DataTypes.DECIMAL(10, 2),
+                allowNull: true,
+                validate: {
+                    min: 0
+                }
+            },
+            spent: {
+                type: DataTypes.DECIMAL(10, 2),
+                allowNull: false,
+                defaultValue: 0.00,
+                validate: {
+                    min: 0
+                }
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'advertisements',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['is_active']
+                },
+                {
+                    fields: ['type']
+                },
+                {
+                    fields: ['priority']
+                },
+                {
+                    fields: ['created_at']
+                },
+                {
+                    fields: ['budget']
+                }
+            ],
+            hooks: {
+                beforeCreate: (ad) => {
+                    if (!ad.name) {
+                        ad.name = `إعلان ${new Date().toLocaleDateString('ar-SA')}`;
+                    }
+                },
+                beforeUpdate: (ad) => {
+                    if (ad.changed('isActive') && !ad.isActive) {
+                        // تحديث الإحصائيات عند إيقاف الإعلان
+                        ad.stats.lastSent = new Date();
+                    }
+                }
+            }
+        });
     }
-});
 
-// ============================================
-// 4. نموذج الإعلانات المحسن
-// ============================================
-const Advertisement = sequelize.define('Advertisement', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للإعلان'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    name: { 
-        type: DataTypes.STRING, 
-        allowNull: false,
-        validate: {
-            notEmpty: true,
-            len: [3, 100]
-        },
-        comment: 'اسم الإعلان'
-    },
-    type: { 
-        type: DataTypes.ENUM(
-            'text', 
-            'image', 
-            'video', 
-            'contact', 
-            'document',
-            'location',
-            'poll',
-            'audio',
-            'sticker',
-            'gif',
-            'buttons',
-            'carousel',
-            'catalog'
-        ),
-        defaultValue: 'text',
-        comment: 'نوع المحتوى'
-    },
-    content: { 
-        type: DataTypes.TEXT, 
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'محتوى الإعلان'
-    },
-    fileId: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'معرف الملف في التخزين'
-    },
-    fileUrl: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'رابط الملف'
-    },
-    caption: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'وصف الصورة/الفيديو'
-    },
-    buttons: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'أزرار تفاعلية'
-    },
-    schedule: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            enabled: false,
-            startTime: null,
-            endTime: null,
-            days: [1, 2, 3, 4, 5, 6, 0],
-            timezone: 'Asia/Riyadh',
-            repeat: false,
-            repeatInterval: 24,
-            repeatCount: null,
-            excludeDates: [],
-            specificDates: []
-        },
-        comment: 'جدولة الإعلان'
-    },
-    target: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            allGroups: true,
-            specificGroups: [],
-            minMembers: 0,
-            maxMembers: 1000000,
-            includeKeywords: [],
-            excludeKeywords: [],
-            countries: [],
-            languages: [],
-            groupTypes: [],
-            excludeOwnedGroups: false,
-            excludeJoinedRecently: false,
-            minJoinDays: 0
-        },
-        comment: 'الجمهور المستهدف'
-    },
-    isActive: { 
-        type: DataTypes.BOOLEAN, 
-        defaultValue: true,
-        comment: 'هل الإعلان نشط؟'
-    },
-    stats: { 
-        type: DataTypes.JSON, 
-        defaultValue: { 
-            sent: 0, 
-            failed: 0,
-            views: 0,
-            clicks: 0,
-            groups: [],
-            lastSent: null,
-            successRate: 0,
-            totalRecipients: 0,
-            deliveryRate: 0,
-            engagementRate: 0,
-            conversions: 0,
-            costPerClick: 0,
-            costPerView: 0
-        },
-        comment: 'إحصائيات الإعلان'
-    },
-    settings: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            delayBetweenGroups: 1000,
-            maxGroupsPerHour: 100,
-            retryFailed: true,
-            optimizeSending: true,
-            randomizeOrder: true,
-            avoidSpam: true,
-            maxRetries: 3,
-            stopOnError: false,
-            errorThreshold: 10,
-            qualityCheck: true,
-            contentReview: true
-        },
-        comment: 'إعدادات النشر'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            category: '',
-            tags: [],
-            campaignId: null,
-            version: 1,
-            lastEditedBy: null,
-            editHistory: [],
-            notes: '',
-            approvalStatus: 'pending',
-            approvedBy: null,
-            approvedAt: null
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    budget: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0,
-        comment: 'الميزانية المخصصة'
-    },
-    spent: {
-        type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0,
-        comment: 'المبلغ المنفق'
-    },
-    startDate: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ بدء الحملة'
-    },
-    endDate: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ انتهاء الحملة'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 6. نموذج النشر التلقائي
+    // ============================================
+    initAutoPostModel() {
+        return this.sequelize.define('AutoPost', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `post_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            target: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    allGroups: true,
+                    specificSessions: [],
+                    excludeGroups: [],
+                    excludeKeywords: [],
+                    minMembers: 10,
+                    maxMembers: 1000,
+                    requireKeywords: [],
+                    priorityGroups: []
+                }
+            },
+            schedule: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    startTime: null,
+                    endTime: null,
+                    repeat: true,
+                    interval: 3600,
+                    daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                    timezone: 'Asia/Riyadh',
+                    randomDelay: true,
+                    minDelay: 500,
+                    maxDelay: 5000
+                }
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'active',
+                    'paused',
+                    'completed',
+                    'error',
+                    'stopped',
+                    'waiting'
+                ),
+                allowNull: false,
+                defaultValue: 'active',
+                validate: {
+                    isIn: [['active', 'paused', 'completed', 'error', 'stopped', 'waiting']]
+                }
+            },
+            settings: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    delayBetweenGroups: 1000,
+                    delayBetweenSessions: 5000,
+                    maxGroupsPerCycle: 50,
+                    retryFailed: true,
+                    maxRetries: 3,
+                    skipRecentlyPosted: true,
+                    recentThreshold: 86400,
+                    rotateAds: false,
+                    adRotationInterval: 3600,
+                    stopOnError: false,
+                    errorThreshold: 5
+                }
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    cyclesCompleted: 0,
+                    totalSent: 0,
+                    totalFailed: 0,
+                    lastCycleAt: null,
+                    successRate: 0,
+                    averageTimePerCycle: 0,
+                    totalTime: 0,
+                    errors: [],
+                    lastError: null,
+                    bySession: {},
+                    byAd: {}
+                }
+            },
+            lastRunAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_run_at'
+            },
+            nextRunAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'next_run_at'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'auto_posts',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['ad_id']
+                },
+                {
+                    fields: ['last_run_at']
+                },
+                {
+                    fields: ['next_run_at']
+                }
+            ],
+            hooks: {
+                beforeCreate: (post) => {
+                    if (!post.name) {
+                        post.name = `نشر تلقائي ${new Date().toLocaleDateString('ar-SA')}`;
+                    }
+                    
+                    if (!post.nextRunAt && post.status === 'active') {
+                        post.nextRunAt = new Date(Date.now() + 60000); // بعد دقيقة
+                    }
+                },
+                beforeUpdate: (post) => {
+                    if (post.changed('status') && post.status === 'active' && !post.nextRunAt) {
+                        post.nextRunAt = new Date(Date.now() + 60000);
+                    }
+                }
+            }
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'advertisements',
-    indexes: [
-        { fields: ['adminId'] },
-        { fields: ['isActive'] },
-        { fields: ['createdAt'] },
-        { fields: ['type'] },
-        { fields: ['schedule.enabled'] }
-    ],
-    hooks: {
-        beforeUpdate: (ad, options) => {
-            ad.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 7. نموذج الردود التلقائية
+    // ============================================
+    initAutoReplyModel() {
+        return this.sequelize.define('AutoReply', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `reply_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            triggerType: {
+                type: DataTypes.ENUM(
+                    'private',
+                    'group',
+                    'both'
+                ),
+                allowNull: false,
+                defaultValue: 'both',
+                field: 'trigger_type',
+                validate: {
+                    isIn: [['private', 'group', 'both']]
+                }
+            },
+            trigger: {
+                type: DataTypes.TEXT,
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            response: {
+                type: DataTypes.TEXT('long'),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            responseType: {
+                type: DataTypes.ENUM(
+                    'text',
+                    'image',
+                    'video',
+                    'contact',
+                    'document',
+                    'location',
+                    'sticker'
+                ),
+                allowNull: false,
+                defaultValue: 'text',
+                field: 'response_type',
+                validate: {
+                    isIn: [['text', 'image', 'video', 'contact', 'document', 'location', 'sticker']]
+                }
+            },
+            matchType: {
+                type: DataTypes.ENUM(
+                    'exact',
+                    'contains',
+                    'regex',
+                    'starts_with',
+                    'ends_with'
+                ),
+                allowNull: false,
+                defaultValue: 'contains',
+                field: 'match_type',
+                validate: {
+                    isIn: [['exact', 'contains', 'regex', 'starts_with', 'ends_with']]
+                }
+            },
+            conditions: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    requireKeywords: [],
+                    excludeKeywords: [],
+                    timeRange: null,
+                    daysOfWeek: [0, 1, 2, 3, 4, 5, 6],
+                    requireMedia: false,
+                    mediaType: null,
+                    requireLocation: false,
+                    locationRange: null,
+                    requireContact: false,
+                    contactType: null
+                }
+            },
+            priority: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 5,
+                validate: {
+                    min: 1,
+                    max: 10
+                }
+            },
+            cooldown: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 30,
+                validate: {
+                    min: 0
+                }
+            },
+            isActive: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: true,
+                field: 'is_active'
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    triggered: 0,
+                    failed: 0,
+                    lastTriggered: null,
+                    bySession: {},
+                    byTrigger: {},
+                    averageResponseTime: 0
+                }
+            },
+            mediaUrl: {
+                type: DataTypes.STRING(500),
+                allowNull: true,
+                field: 'media_url'
+            },
+            mediaType: {
+                type: DataTypes.STRING(50),
+                allowNull: true,
+                field: 'media_type'
+            },
+            mediaSize: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                field: 'media_size'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'auto_replies',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['session_id']
+                },
+                {
+                    fields: ['is_active']
+                },
+                {
+                    fields: ['trigger_type']
+                },
+                {
+                    fields: ['priority']
+                },
+                {
+                    fields: ['trigger']
+                }
+            ],
+            hooks: {
+                beforeCreate: (reply) => {
+                    if (!reply.name) {
+                        reply.name = `رد ${reply.trigger.substring(0, 20)}...`;
+                    }
+                    
+                    // تأكد من أن trigger نص
+                    if (typeof reply.trigger !== 'string') {
+                        reply.trigger = String(reply.trigger);
+                    }
+                },
+                beforeUpdate: (reply) => {
+                    if (reply.changed('trigger')) {
+                        reply.stats.lastTriggered = null;
+                    }
+                }
+            }
+        });
     }
-});
 
-// ============================================
-// 5. نموذج النشر التلقائي المحسن
-// ============================================
-const AutoPost = sequelize.define('AutoPost', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للنشر التلقائي'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    sessionId: { 
-        type: DataTypes.STRING, 
-        allowNull: false,
-        comment: 'معرف الجلسة المستخدمة'
-    },
-    adId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف الإعلان المراد نشره'
-    },
-    status: { 
-        type: DataTypes.ENUM(
-            'active', 
-            'paused', 
-            'completed', 
-            'error',
-            'waiting',
-            'stopped',
-            'queued'
-        ),
-        defaultValue: 'active',
-        comment: 'حالة النشر'
-    },
-    interval: { 
-        type: DataTypes.INTEGER, 
-        defaultValue: 1,
-        validate: {
-            min: 1,
-            max: 3600
-        },
-        comment: 'الفاصل الزمني بالساعات'
-    },
-    lastPostAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ آخر نشر'
-    },
-    nextPostAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ النشر التالي'
-    },
-    stats: { 
-        type: DataTypes.JSON, 
-        defaultValue: { 
-            totalGroups: 0,
-            postedGroups: 0,
-            failedGroups: [],
-            cycle: 0,
-            totalMessages: 0,
-            startTime: null,
-            lastCycleTime: null,
-            averageTimePerCycle: 0,
-            successRate: 0,
-            totalTimeSpent: 0,
-            efficiency: 0,
-            lastError: null,
-            errorCount: 0
-        },
-        comment: 'إحصائيات النشر'
-    },
-    settings: { 
-        type: DataTypes.JSON, 
-        defaultValue: {
-            randomDelay: true,
-            minDelay: 500,
-            maxDelay: 3000,
-            skipInactive: true,
-            maxRetries: 3,
-            stopOnError: false,
-            optimizePath: true,
-            avoidDuplicates: true,
-            qualityCheck: true,
-            rotateMessages: false,
-            rotationCount: 5,
-            adaptiveDelay: true,
-            monitorPerformance: true,
-            autoPauseOnLowQuality: false
-        },
-        comment: 'إعدادات النشر'
-    },
-    logs: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'سجلات النشر'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            startMethod: 'manual',
-            stopReason: null,
-            pausedBy: null,
-            resumedBy: null,
-            lastOptimized: null,
-            optimizationCount: 0,
-            tags: [],
-            category: 'general'
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 8. نموذج الانضمام التلقائي
+    // ============================================
+    initAutoJoinModel() {
+        return this.sequelize.define('AutoJoin', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `join_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            links: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: [],
+                validate: {
+                    isArray(value) {
+                        if (!Array.isArray(value)) {
+                            throw new Error('يجب أن تكون الروابط مصفوفة');
+                        }
+                    }
+                }
+            },
+            filters: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    minMembers: 0,
+                    maxMembers: 1000000,
+                    allowedKeywords: [],
+                    excludedKeywords: [],
+                    allowedLanguages: [],
+                    excludeCountries: [],
+                    requireDescription: false,
+                    requireActive: true,
+                    activeThreshold: 7,
+                    excludeRecent: true,
+                    recentThreshold: 3
+                }
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'active',
+                    'paused',
+                    'completed',
+                    'error',
+                    'stopped'
+                ),
+                allowNull: false,
+                defaultValue: 'active',
+                validate: {
+                    isIn: [['active', 'paused', 'completed', 'error', 'stopped']]
+                }
+            },
+            settings: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    delayBetweenJoins: 120000,
+                    maxJoinsPerDay: 50,
+                    notifyOnJoin: true,
+                    stopOnError: false,
+                    autoLeaveInactive: false,
+                    inactiveDays: 30,
+                    verifyGroup: true,
+                    verificationDelay: 5000,
+                    skipDuplicates: true,
+                    duplicateThreshold: 7
+                }
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    totalLinks: 0,
+                    joined: 0,
+                    failed: 0,
+                    successRate: 0,
+                    lastJoinAt: null,
+                    lastError: null,
+                    lastLinks: [],
+                    averageJoinTime: 0,
+                    bySession: {},
+                    byTime: {}
+                }
+            },
+            lastRunAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'last_run_at'
+            },
+            nextRunAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'next_run_at'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'auto_joins',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['session_id']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['last_run_at']
+                },
+                {
+                    fields: ['next_run_at']
+                }
+            ],
+            hooks: {
+                beforeCreate: (join) => {
+                    if (!join.name) {
+                        join.name = `انضمام ${new Date().toLocaleDateString('ar-SA')}`;
+                    }
+                    
+                    // تأكد من أن links مصفوفة
+                    if (!Array.isArray(join.links)) {
+                        join.links = [];
+                    }
+                    
+                    // حساب totalLinks
+                    join.stats.totalLinks = join.links.length;
+                },
+                beforeUpdate: (join) => {
+                    if (join.changed('links')) {
+                        join.stats.totalLinks = join.links.length;
+                    }
+                }
+            }
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'auto_posts',
-    indexes: [
-        { fields: ['adminId', 'status'] },
-        { fields: ['sessionId'] },
-        { fields: ['nextPostAt'] },
-        { fields: ['adId'] },
-        { fields: ['createdAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (autoPost, options) => {
-            autoPost.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 9. نموذج البث الجماعي
+    // ============================================
+    initBroadcastModel() {
+        return this.sequelize.define('Broadcast', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `broadcast_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            type: {
+                type: DataTypes.ENUM(
+                    'contacts',
+                    'groups',
+                    'both',
+                    'specific'
+                ),
+                allowNull: false,
+                defaultValue: 'groups',
+                validate: {
+                    isIn: [['contacts', 'groups', 'both', 'specific']]
+                }
+            },
+            content: {
+                type: DataTypes.TEXT('long'),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            target: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    allContacts: true,
+                    allGroups: true,
+                    specificContacts: [],
+                    specificGroups: [],
+                    excludeContacts: [],
+                    excludeGroups: [],
+                    filters: {
+                        minMembers: 0,
+                        maxMembers: 1000000,
+                        activeOnly: true,
+                        recentActivity: 30
+                    }
+                }
+            },
+            schedule: {
+                type: DataTypes.JSON,
+                allowNull: true,
+                defaultValue: {
+                    sendAt: null,
+                    repeat: false,
+                    interval: 0,
+                    timezone: 'Asia/Riyadh',
+                    optimizeTime: true,
+                    peakHours: [9, 10, 11, 15, 16, 17, 20, 21]
+                }
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'scheduled',
+                    'sending',
+                    'completed',
+                    'failed',
+                    'cancelled',
+                    'paused'
+                ),
+                allowNull: false,
+                defaultValue: 'scheduled',
+                validate: {
+                    isIn: [['scheduled', 'sending', 'completed', 'failed', 'cancelled', 'paused']]
+                }
+            },
+            stats: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                defaultValue: {
+                    total: 0,
+                    sent: 0,
+                    failed: 0,
+                    progress: 0,
+                    startTime: null,
+                    endTime: null,
+                    duration: 0,
+                    successRate: 0,
+                    bySession: {},
+                    byType: {}
+                }
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'broadcasts',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['type']
+                },
+                {
+                    fields: ['created_at']
+                }
+            ],
+            hooks: {
+                beforeCreate: (broadcast) => {
+                    if (!broadcast.name) {
+                        broadcast.name = `بث ${new Date().toLocaleDateString('ar-SA')}`;
+                    }
+                },
+                beforeUpdate: (broadcast) => {
+                    if (broadcast.changed('status') && broadcast.status === 'sending') {
+                        broadcast.stats.startTime = new Date();
+                    } else if (broadcast.changed('status') && broadcast.status === 'completed') {
+                        broadcast.stats.endTime = new Date();
+                        if (broadcast.stats.startTime) {
+                            broadcast.stats.duration = 
+                                (broadcast.stats.endTime - broadcast.stats.startTime) / 1000;
+                        }
+                        if (broadcast.stats.total > 0) {
+                            broadcast.stats.successRate = 
+                                (broadcast.stats.sent / broadcast.stats.total) * 100;
+                        }
+                    }
+                }
+            }
+        });
     }
-});
 
-// ============================================
-// 6. نموذج الردود التلقائية المحسن
-// ============================================
-const AutoReply = sequelize.define('AutoReply', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للرد التلقائي'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    sessionId: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'معرف الجلسة المستخدمة'
-    },
-    name: { 
-        type: DataTypes.STRING, 
-        allowNull: false,
-        validate: {
-            notEmpty: true,
-            len: [3, 50]
-        },
-        comment: 'اسم الرد التلقائي'
-    },
-    triggerType: { 
-        type: DataTypes.ENUM(
-            'private', 
-            'group', 
-            'both',
-            'broadcast',
-            'channel'
-        ),
-        defaultValue: 'both',
-        comment: 'نوع المحادثة المستهدفة'
-    },
-    trigger: { 
-        type: DataTypes.TEXT, 
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'النص المحفز'
-    },
-    response: { 
-        type: DataTypes.TEXT, 
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'نص الرد'
-    },
-    responseType: {
-        type: DataTypes.ENUM('text', 'image', 'file', 'contact', 'location', 'poll'),
-        defaultValue: 'text',
-        comment: 'نوع الرد'
-    },
-    isActive: { 
-        type: DataTypes.BOOLEAN, 
-        defaultValue: true,
-        comment: 'هل الرد نشط؟'
-    },
-    matchType: { 
-        type: DataTypes.ENUM(
-            'exact', 
-            'contains', 
-            'regex',
-            'starts_with',
-            'ends_with',
-            'similar',
-            'multiple'
-        ),
-        defaultValue: 'contains',
-        comment: 'طريقة المطابقة'
-    },
-    priority: {
-        type: DataTypes.INTEGER,
-        defaultValue: 1,
-        validate: {
-            min: 1,
-            max: 10
-        },
-        comment: 'أولوية الرد'
-    },
-    cooldown: {
-        type: DataTypes.INTEGER,
-        defaultValue: 0,
-        comment: 'فترة التبريد بالثواني'
-    },
-    conditions: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            timeRange: null,
-            daysOfWeek: null,
-            maxTriggersPerDay: null,
-            requireKeywords: [],
-            excludeKeywords: [],
-            requireSenderType: null,
-            excludeSenders: [],
-            requireGroupSize: null,
-            excludeGroups: [],
-            language: null,
-            country: null,
-            messageLength: null,
-            hasMedia: null,
-            isForwarded: null,
-            isReply: null
-        },
-        comment: 'شروط إضافية'
-    },
-    stats: { 
-        type: DataTypes.JSON, 
-        defaultValue: { 
-            triggered: 0,
-            lastTriggered: null,
-            successful: 0,
-            failed: 0,
-            bySession: {},
-            byTime: {},
-            bySender: {},
-            successRate: 0,
-            averageResponseTime: 0,
-            totalResponseTime: 0
-        },
-        comment: 'إحصائيات الرد'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            category: 'general',
-            tags: [],
-            version: 1,
-            lastEditedBy: null,
-            editHistory: [],
-            notes: '',
-            aiEnhanced: false,
-            learningEnabled: false,
-            confidenceScore: 0
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 10. نموذج الإشعارات
+    // ============================================
+    initNotificationModel() {
+        return this.sequelize.define('Notification', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            type: {
+                type: DataTypes.ENUM(
+                    'info',
+                    'success',
+                    'warning',
+                    'error',
+                    'system',
+                    'broadcast',
+                    'advertisement',
+                    'session',
+                    'link',
+                    'join'
+                ),
+                allowNull: false,
+                defaultValue: 'info',
+                validate: {
+                    isIn: [['info', 'success', 'warning', 'error', 'system', 'broadcast', 'advertisement', 'session', 'link', 'join']]
+                }
+            },
+            title: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true,
+                    len: [3, 255]
+                }
+            },
+            message: {
+                type: DataTypes.TEXT,
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            data: {
+                type: DataTypes.JSON,
+                allowNull: true
+            },
+            isRead: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false,
+                field: 'is_read'
+            },
+            readAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'read_at'
+            },
+            priority: {
+                type: DataTypes.INTEGER,
+                allowNull: false,
+                defaultValue: 3,
+                validate: {
+                    min: 1,
+                    max: 5
+                }
+            },
+            expiresAt: {
+                type: DataTypes.DATE,
+                allowNull: true,
+                field: 'expires_at'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'notifications',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['is_read']
+                },
+                {
+                    fields: ['type']
+                },
+                {
+                    fields: ['priority']
+                },
+                {
+                    fields: ['created_at']
+                },
+                {
+                    fields: ['expires_at']
+                }
+            ],
+            hooks: {
+                beforeCreate: (notification) => {
+                    if (!notification.title) {
+                        notification.title = 'إشعار جديد';
+                    }
+                    
+                    // تحديد تاريخ انتهاء إذا لم يكن محدداً
+                    if (!notification.expiresAt) {
+                        const expiryDays = {
+                            'info': 7,
+                            'success': 7,
+                            'warning': 30,
+                            'error': 90,
+                            'system': 365
+                        };
+                        
+                        const days = expiryDays[notification.type] || 7;
+                        notification.expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+                    }
+                }
+            }
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'auto_replies',
-    indexes: [
-        { fields: ['adminId', 'isActive'] },
-        { fields: ['sessionId'] },
-        { fields: ['triggerType'] },
-        { fields: ['priority'] },
-        { fields: ['matchType'] },
-        { fields: ['createdAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (autoReply, options) => {
-            autoReply.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 11. نموذج سجلات النشاطات
+    // ============================================
+    initActivityLogModel() {
+        return this.sequelize.define('ActivityLog', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            action: {
+                type: DataTypes.STRING(100),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            module: {
+                type: DataTypes.STRING(50),
+                allowNull: true
+            },
+            details: {
+                type: DataTypes.JSON,
+                allowNull: true
+            },
+            ipAddress: {
+                type: DataTypes.STRING(45),
+                allowNull: true,
+                field: 'ip_address'
+            },
+            userAgent: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                field: 'user_agent'
+            },
+            status: {
+                type: DataTypes.ENUM('success', 'failed', 'warning'),
+                allowNull: false,
+                defaultValue: 'success'
+            },
+            executionTime: {
+                type: DataTypes.INTEGER,
+                allowNull: true,
+                field: 'execution_time'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'activity_logs',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['admin_id']
+                },
+                {
+                    fields: ['session_id']
+                },
+                {
+                    fields: ['action']
+                },
+                {
+                    fields: ['module']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['created_at']
+                },
+                {
+                    fields: ['ip_address']
+                }
+            ]
+        });
     }
-});
 
-// ============================================
-// 7. نموذج الانضمام التلقائي المحسن
-// ============================================
-const AutoJoin = sequelize.define('AutoJoin', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للانضمام التلقائي'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    sessionId: { 
-        type: DataTypes.STRING, 
-        allowNull: false,
-        comment: 'معرف الجلسة المستخدمة'
-    },
-    status: { 
-        type: DataTypes.ENUM(
-            'active', 
-            'paused', 
-            'completed',
-            'error',
-            'stopped',
-            'waiting'
-        ),
-        defaultValue: 'active',
-        comment: 'حالة الانضمام'
-    },
-    lastJoinAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ آخر انضمام'
-    },
-    nextJoinAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ الانضمام التالي'
-    },
-    stats: { 
-        type: DataTypes.JSON, 
-        defaultValue: { 
-            totalLinks: 0,
-            joined: 0,
-            failed: 0,
-            skipped: 0,
-            lastLinks: [],
-            successRate: 0,
-            lastError: null,
-            totalTimeSpent: 0,
-            averageTimePerJoin: 0,
-            groupsDiscovered: 0,
-            activeGroups: 0,
-            inactiveGroups: 0,
-            errorLogs: []
-        },
-        comment: 'إحصائيات الانضمام'
-    },
-    filters: { 
-        type: DataTypes.JSON, 
-        defaultValue: {
-            minGroupSize: 0,
-            maxGroupSize: 100000,
-            allowedKeywords: [],
-            excludedKeywords: [],
-            countryCodes: [],
-            requireDescription: false,
-            maxJoinsPerHour: 10,
-            minSuccessRate: 0,
-            excludeJoinedGroups: true,
-            excludeRecentGroups: true,
-            recentDaysThreshold: 7,
-            languageFilter: [],
-            categoryFilter: [],
-            qualityThreshold: 0
-        },
-        comment: 'فلاتر المجموعات'
-    },
-    settings: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            delayBetweenJoins: 5000,
-            verifyBeforeJoin: true,
-            leaveInactiveGroups: false,
-            autoLeaveAfterDays: 30,
-            notifyOnJoin: true,
-            monitorGroupActivity: true,
-            autoOptimize: true,
-            adaptiveDelay: true,
-            maxRetries: 3,
-            stopOnManyErrors: true,
-            errorThreshold: 5,
-            backupSession: false,
-            rotateSessions: false
-        },
-        comment: 'إعدادات الانضمام'
-    },
-    logs: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'سجلات الانضمام'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            startMethod: 'manual',
-            stopReason: null,
-            discoveredGroups: [],
-            blacklistedGroups: [],
-            whitelistedGroups: [],
-            tags: [],
-            category: 'general',
-            lastOptimized: null,
-            optimizationCount: 0
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 12. نموذج الأرشفة
+    // ============================================
+    initArchiveModel() {
+        return this.sequelize.define('Archive', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `arch_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            tableName: {
+                type: DataTypes.STRING(100),
+                allowNull: false,
+                field: 'table_name',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            recordId: {
+                type: DataTypes.STRING(50),
+                allowNull: false,
+                field: 'record_id',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            data: {
+                type: DataTypes.JSON,
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            archivedBy: {
+                type: DataTypes.STRING(50),
+                allowNull: true,
+                field: 'archived_by'
+            },
+            reason: {
+                type: DataTypes.STRING(255),
+                allowNull: true
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'archives',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['table_name']
+                },
+                {
+                    fields: ['record_id']
+                },
+                {
+                    fields: ['archived_by']
+                },
+                {
+                    fields: ['archived_at']
+                }
+            ]
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'auto_joins',
-    indexes: [
-        { fields: ['adminId', 'status'] },
-        { fields: ['sessionId'] },
-        { fields: ['nextJoinAt'] },
-        { fields: ['createdAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (autoJoin, options) => {
-            autoJoin.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 13. نموذج محاولات الدخول
+    // ============================================
+    initLoginAttemptModel() {
+        return this.sequelize.define('LoginAttempt', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `login_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            ipAddress: {
+                type: DataTypes.STRING(45),
+                allowNull: false,
+                field: 'ip_address',
+                validate: {
+                    notEmpty: true
+                }
+            },
+            userAgent: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                field: 'user_agent'
+            },
+            success: {
+                type: DataTypes.BOOLEAN,
+                allowNull: false,
+                defaultValue: false
+            },
+            reason: {
+                type: DataTypes.STRING(255),
+                allowNull: true
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'login_attempts',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['telegram_id']
+                },
+                {
+                    fields: ['ip_address']
+                },
+                {
+                    fields: ['success']
+                },
+                {
+                    fields: ['attempt_time']
+                }
+            ]
+        });
     }
-});
 
-// ============================================
-// 8. نموذج البث الجماعي المحسن
-// ============================================
-const Broadcast = sequelize.define('Broadcast', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للبث'
-    },
-    adminId: { 
-        type: DataTypes.INTEGER, 
-        allowNull: false,
-        comment: 'معرف المشرف المالك'
-    },
-    sessionId: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'معرف الجلسة المستخدمة'
-    },
-    name: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'اسم البث'
-    },
-    message: {
-        type: DataTypes.TEXT,
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'محتوى الرسالة'
-    },
-    type: {
-        type: DataTypes.ENUM('text', 'image', 'document', 'video', 'audio', 'contact', 'location'),
-        defaultValue: 'text',
-        comment: 'نوع الرسالة'
-    },
-    targetType: {
-        type: DataTypes.ENUM('contacts', 'groups', 'specific', 'all', 'filtered'),
-        defaultValue: 'contacts',
-        comment: 'نوع الجمهور المستهدف'
-    },
-    targets: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'قائمة المستهدفين'
-    },
-    filters: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            minGroupSize: 0,
-            maxGroupSize: 100000,
-            includeKeywords: [],
-            excludeKeywords: [],
-            countries: [],
-            languages: [],
-            groupTypes: [],
-            excludeRecent: false,
-            excludeInactive: true,
-            qualityThreshold: 0
-        },
-        comment: 'فلاتر الجمهور'
-    },
-    status: {
-        type: DataTypes.ENUM('pending', 'sending', 'completed', 'failed', 'paused', 'cancelled'),
-        defaultValue: 'pending',
-        comment: 'حالة البث'
-    },
-    progress: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            total: 0,
-            sent: 0,
-            failed: 0,
-            current: 0,
-            pending: 0,
-            successRate: 0,
-            averageTimePerMessage: 0,
-            estimatedTimeRemaining: 0
-        },
-        comment: 'تقدم البث'
-    },
-    scheduledAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ الجدولة'
-    },
-    startedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ البدء'
-    },
-    completedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ الإكمال'
-    },
-    results: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'نتائج البث'
-    },
-    settings: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            delayBetweenMessages: 1000,
-            maxRetries: 3,
-            stopOnManyErrors: true,
-            errorThreshold: 10,
-            optimizeOrder: true,
-            randomizeDelay: true,
-            minDelay: 500,
-            maxDelay: 3000,
-            trackResponses: true,
-            autoStopOnLowSuccess: false,
-            successThreshold: 50,
-            backupSession: false
-        },
-        comment: 'إعدادات البث'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            category: 'general',
-            tags: [],
-            campaignId: null,
-            version: 1,
-            notes: '',
-            priority: 1,
-            retryCount: 0,
-            lastRetryAt: null,
-            createdBy: 'system'
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
+    // ============================================
+    // 14. نموذج سجلات النظام
+    // ============================================
+    initSystemLogModel() {
+        return this.sequelize.define('SystemLog', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `syslog_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            level: {
+                type: DataTypes.ENUM(
+                    'debug',
+                    'info',
+                    'warning',
+                    'error',
+                    'critical'
+                ),
+                allowNull: false,
+                defaultValue: 'info',
+                validate: {
+                    isIn: [['debug', 'info', 'warning', 'error', 'critical']]
+                }
+            },
+            component: {
+                type: DataTypes.STRING(100),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            message: {
+                type: DataTypes.TEXT,
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            details: {
+                type: DataTypes.JSON,
+                allowNull: true
+            },
+            stackTrace: {
+                type: DataTypes.TEXT,
+                allowNull: true,
+                field: 'stack_trace'
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'system_logs',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['level']
+                },
+                {
+                    fields: ['component']
+                },
+                {
+                    fields: ['created_at']
+                }
+            ]
+        });
     }
-}, {
-    timestamps: true,
-    tableName: 'broadcasts',
-    indexes: [
-        { fields: ['adminId'] },
-        { fields: ['status'] },
-        { fields: ['scheduledAt'] },
-        { fields: ['createdAt'] },
-        { fields: ['targetType'] }
-    ],
-    hooks: {
-        beforeUpdate: (broadcast, options) => {
-            broadcast.updatedAt = new Date();
-        }
+
+    // ============================================
+    // 15. نموذج النسخ الاحتياطية
+    // ============================================
+    initBackupModel() {
+        return this.sequelize.define('Backup', {
+            id: {
+                type: DataTypes.STRING(50),
+                primaryKey: true,
+                defaultValue: () => `backup_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+            },
+            name: {
+                type: DataTypes.STRING(255),
+                allowNull: false,
+                validate: {
+                    notEmpty: true
+                }
+            },
+            type: {
+                type: DataTypes.ENUM(
+                    'full',
+                    'incremental',
+                    'differential',
+                    'schema',
+                    'data'
+                ),
+                allowNull: false,
+                defaultValue: 'full',
+                validate: {
+                    isIn: [['full', 'incremental', 'differential', 'schema', 'data']]
+                }
+            },
+            size: {
+                type: DataTypes.BIGINT,
+                allowNull: true,
+                validate: {
+                    min: 0
+                }
+            },
+            filePath: {
+                type: DataTypes.STRING(500),
+                allowNull: true,
+                field: 'file_path'
+            },
+            checksum: {
+                type: DataTypes.STRING(64),
+                allowNull: true
+            },
+            status: {
+                type: DataTypes.ENUM(
+                    'pending',
+                    'in_progress',
+                    'completed',
+                    'failed',
+                    'verified',
+                    'corrupted'
+                ),
+                allowNull: false,
+                defaultValue: 'pending',
+                validate: {
+                    isIn: [['pending', 'in_progress', 'completed', 'failed', 'verified', 'corrupted']]
+                }
+            },
+            metadata: {
+                type: DataTypes.JSON,
+                allowNull: true
+            }
+        }, {
+            tableName: 'backups',
+            timestamps: true,
+            paranoid: true,
+            underscored: true,
+            indexes: [
+                {
+                    fields: ['type']
+                },
+                {
+                    fields: ['status']
+                },
+                {
+                    fields: ['created_at']
+                }
+            ]
+        });
     }
-});
 
-// ============================================
-// 9. نموذج سجلات النظام (Logs)
-// ============================================
-const SystemLog = sequelize.define('SystemLog', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للسجل'
-    },
-    level: {
-        type: DataTypes.ENUM('info', 'warning', 'error', 'debug', 'critical'),
-        defaultValue: 'info',
-        comment: 'مستوى السجل'
-    },
-    category: {
-        type: DataTypes.ENUM(
-            'system', 
-            'whatsapp', 
-            'telegram', 
-            'database', 
-            'api',
-            'autopost',
-            'autoreply',
-            'autojoin',
-            'broadcast',
-            'advertisement',
-            'security',
-            'performance',
-            'maintenance'
-        ),
-        defaultValue: 'system',
-        comment: 'فئة السجل'
-    },
-    message: {
-        type: DataTypes.TEXT,
-        allowNull: false,
-        comment: 'نص السجل'
-    },
-    details: {
-        type: DataTypes.JSON,
-        defaultValue: {},
-        comment: 'تفاصيل إضافية'
-    },
-    sessionId: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'معرف الجلسة'
-    },
-    adminId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        comment: 'معرف المشرف'
-    },
-    ipAddress: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'عنوان IP'
-    },
-    userAgent: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'وكيل المستخدم'
-    },
-    resolved: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-        comment: 'هل تم حل المشكلة؟'
-    },
-    resolvedAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ الحل'
-    },
-    resolvedBy: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'تم الحل بواسطة'
-    },
-    tags: {
-        type: DataTypes.JSON,
-        defaultValue: [],
-        comment: 'وسوم السجل'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
+    // ============================================
+    // 16. دوال مساعدة للنماذج
+    // ============================================
+    classifyLinkType(url) {
+        if (!url) return 'other';
+        
+        url = url.toLowerCase();
+        
+        if (url.includes('chat.whatsapp.com')) return 'whatsapp_group';
+        if (url.includes('whatsapp.com')) return 'whatsapp_invite';
+        if (url.includes('t.me') || url.includes('telegram.me')) return 'telegram';
+        if (url.includes('discord.gg') || url.includes('discord.com')) return 'discord';
+        if (url.includes('signal.group')) return 'signal';
+        if (url.includes('youtube.com') || url.includes('youtu.be')) return 'youtube';
+        if (url.includes('instagram.com')) return 'instagram';
+        if (url.includes('facebook.com')) return 'facebook';
+        if (url.includes('twitter.com') || url.includes('x.com')) return 'twitter';
+        if (url.includes('tiktok.com')) return 'tiktok';
+        
+        return 'website';
     }
-}, {
-    timestamps: true,
-    updatedAt: false,
-    tableName: 'system_logs',
-    indexes: [
-        { fields: ['level'] },
-        { fields: ['category'] },
-        { fields: ['createdAt'] },
-        { fields: ['sessionId'] },
-        { fields: ['adminId'] },
-        { fields: ['resolved'] }
-    ]
-});
 
-// ============================================
-// 10. نموذج الإحصائيات اليومية
-// ============================================
-const DailyStat = sequelize.define('DailyStat', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للإحصائية'
-    },
-    date: {
-        type: DataTypes.DATEONLY,
-        allowNull: false,
-        unique: true,
-        comment: 'التاريخ'
-    },
-    adminId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        comment: 'معرف المشرف'
-    },
-    stats: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            // جلسات واتساب
-            activeSessions: 0,
-            totalSessions: 0,
-            newSessions: 0,
-            disconnectedSessions: 0,
-            
-            // الرسائل
-            messagesReceived: 0,
-            messagesSent: 0,
-            totalMessages: 0,
-            avgResponseTime: 0,
-            
-            // الروابط
-            linksCollected: 0,
-            whatsappLinks: 0,
-            telegramLinks: 0,
-            otherLinks: 0,
-            activeLinks: 0,
-            expiredLinks: 0,
-            
-            // الإعلانات
-            adsPosted: 0,
-            adsCreated: 0,
-            activeAds: 0,
-            adSuccessRate: 0,
-            
-            // النشر التلقائي
-            autoPostsCompleted: 0,
-            autoPostSuccessRate: 0,
-            autoPostMessages: 0,
-            
-            // الردود التلقائية
-            autoRepliesTriggered: 0,
-            autoReplySuccessRate: 0,
-            
-            // الانضمام التلقائي
-            autoJoinsCompleted: 0,
-            groupsJoined: 0,
-            autoJoinSuccessRate: 0,
-            
-            // البث الجماعي
-            broadcastsSent: 0,
-            broadcastRecipients: 0,
-            broadcastSuccessRate: 0,
-            
-            // النظام
-            errors: 0,
-            warnings: 0,
-            uptime: 0,
-            memoryUsage: 0,
-            cpuUsage: 0,
-            
-            // الأداء
-            peakActivity: null,
-            lowActivity: null,
-            avgActivity: 0,
-            efficiency: 0,
-            qualityScore: 0
-        },
-        comment: 'الإحصائيات اليومية'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {
-            notes: '',
-            tags: [],
-            verified: false,
-            anomalies: [],
-            trends: [],
-            recommendations: []
-        },
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
-    }
-}, {
-    timestamps: true,
-    tableName: 'daily_stats',
-    indexes: [
-        { fields: ['date'] },
-        { fields: ['adminId'] },
-        { fields: ['createdAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (dailyStat, options) => {
-            dailyStat.updatedAt = new Date();
-        }
-    }
-});
-
-// ============================================
-// 11. نموذج إعدادات النظام
-// ============================================
-const SystemSetting = sequelize.define('SystemSetting', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي للإعداد'
-    },
-    key: {
-        type: DataTypes.STRING,
-        unique: true,
-        allowNull: false,
-        validate: {
-            notEmpty: true
-        },
-        comment: 'مفتاح الإعداد'
-    },
-    value: {
-        type: DataTypes.JSON,
-        allowNull: false,
-        comment: 'قيمة الإعداد'
-    },
-    category: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'general',
-        comment: 'فئة الإعداد'
-    },
-    description: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'وصف الإعداد'
-    },
-    isPublic: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: false,
-        comment: 'هل الإعداد عام؟'
-    },
-    editable: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        comment: 'هل يمكن تعديله؟'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {},
-        comment: 'بيانات وصفية إضافية'
-    },
-    version: {
-        type: DataTypes.INTEGER,
-        defaultValue: 1,
-        comment: 'نسخة الإعداد'
-    },
-    updatedBy: {
-        type: DataTypes.STRING,
-        allowNull: true,
-        comment: 'آخر من قام بالتحديث'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
-    }
-}, {
-    timestamps: true,
-    tableName: 'system_settings',
-    indexes: [
-        { fields: ['key'] },
-        { fields: ['category'] },
-        { fields: ['isPublic'] }
-    ],
-    hooks: {
-        beforeUpdate: (setting, options) => {
-            setting.updatedAt = new Date();
-            setting.version += 1;
-        }
-    }
-});
-
-// ============================================
-// 12. نموذج قوائم الحظر
-// ============================================
-const Blacklist = sequelize.define('Blacklist', {
-    id: { 
-        type: DataTypes.INTEGER, 
-        primaryKey: true, 
-        autoIncrement: true,
-        comment: 'المعرف الأساسي'
-    },
-    type: {
-        type: DataTypes.ENUM('phone', 'group', 'contact', 'url', 'ip', 'keyword'),
-        allowNull: false,
-        comment: 'نوع العنصر الممنوع'
-    },
-    value: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        comment: 'قيمة العنصر الممنوع'
-    },
-    reason: {
-        type: DataTypes.TEXT,
-        allowNull: true,
-        comment: 'سبب المنع'
-    },
-    adminId: {
-        type: DataTypes.INTEGER,
-        allowNull: true,
-        comment: 'معرف المشرف الذي أضافه'
-    },
-    severity: {
-        type: DataTypes.ENUM('low', 'medium', 'high', 'critical'),
-        defaultValue: 'medium',
-        comment: 'شدة المنع'
-    },
-    expiresAt: {
-        type: DataTypes.DATE,
-        allowNull: true,
-        comment: 'تاريخ انتهاء المنع'
-    },
-    isActive: {
-        type: DataTypes.BOOLEAN,
-        defaultValue: true,
-        comment: 'هل المنع فعال؟'
-    },
-    metadata: {
-        type: DataTypes.JSON,
-        defaultValue: {},
-        comment: 'بيانات وصفية إضافية'
-    },
-    createdAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ الإنشاء'
-    },
-    updatedAt: { 
-        type: DataTypes.DATE, 
-        defaultValue: DataTypes.NOW,
-        comment: 'تاريخ التحديث'
-    }
-}, {
-    timestamps: true,
-    tableName: 'blacklist',
-    indexes: [
-        { fields: ['type'] },
-        { fields: ['value'] },
-        { fields: ['isActive'] },
-        { fields: ['expiresAt'] }
-    ],
-    hooks: {
-        beforeUpdate: (blacklist, options) => {
-            blacklist.updatedAt = new Date();
-        }
-    }
-});
-
-// ============================================
-// 13. العلاقات بين النماذج
-// ============================================
-
-// المشرف ↔ الجلسات (One-to-Many)
-Admin.hasMany(WhatsAppSession, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-WhatsAppSession.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// المشرف ↔ الإعلانات (One-to-Many)
-Admin.hasMany(Advertisement, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-Advertisement.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// المشرف ↔ النشر التلقائي (One-to-Many)
-Admin.hasMany(AutoPost, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-AutoPost.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// المشرف ↔ الردود التلقائية (One-to-Many)
-Admin.hasMany(AutoReply, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-AutoReply.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// المشرف ↔ الانضمام التلقائي (One-to-Many)
-Admin.hasMany(AutoJoin, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-AutoJoin.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// المشرف ↔ البث الجماعي (One-to-Many)
-Admin.hasMany(Broadcast, { foreignKey: 'adminId', onDelete: 'CASCADE' });
-Broadcast.belongsTo(Admin, { foreignKey: 'adminId' });
-
-// الجلسة ↔ الروابط (One-to-Many)
-WhatsAppSession.hasMany(CollectedLink, { foreignKey: 'sessionId', onDelete: 'SET NULL' });
-CollectedLink.belongsTo(WhatsAppSession, { foreignKey: 'sessionId' });
-
-// الجلسة ↔ النشر التلقائي (One-to-Many)
-WhatsAppSession.hasMany(AutoPost, { foreignKey: 'sessionId', onDelete: 'CASCADE' });
-AutoPost.belongsTo(WhatsAppSession, { foreignKey: 'sessionId' });
-
-// الجلسة ↔ الانضمام التلقائي (One-to-Many)
-WhatsAppSession.hasMany(AutoJoin, { foreignKey: 'sessionId', onDelete: 'CASCADE' });
-AutoJoin.belongsTo(WhatsAppSession, { foreignKey: 'sessionId' });
-
-// الإعلان ↔ النشر التلقائي (One-to-Many)
-Advertisement.hasMany(AutoPost, { foreignKey: 'adId', onDelete: 'CASCADE' });
-AutoPost.belongsTo(Advertisement, { foreignKey: 'adId' });
-
-// ============================================
-// 14. تصدير النماذج
-// ============================================
-module.exports = {
-    Admin,
-    WhatsAppSession,
-    CollectedLink,
-    Advertisement,
-    AutoPost,
-    AutoReply,
-    AutoJoin,
-    Broadcast,
-    SystemLog,
-    DailyStat,
-    SystemSetting,
-    Blacklist,
-    
-    // دوال مساعدة للنماذج
-    models: {
-        Admin,
-        WhatsAppSession,
-        CollectedLink,
-        Advertisement,
-        AutoPost,
-        AutoReply,
-        AutoJoin,
-        Broadcast,
-        SystemLog,
-        DailyStat,
-        SystemSetting,
-        Blacklist
-    },
-    
-    // دالة لتهيئة جميع النماذج
-    initializeModels: async function() {
+    generateLinkTitle(url) {
         try {
-            console.log('🔧 جاري تهيئة نماذج قاعدة البيانات...');
+            const urlObj = new URL(url);
+            const hostname = urlObj.hostname.replace('www.', '');
             
-            // التحقق من الاتصال بقاعدة البيانات
-            await sequelize.authenticate();
-            console.log('✅ تم الاتصال بقاعدة البيانات');
+            // استخراج اسم من الرابط
+            const pathParts = urlObj.pathname.split('/').filter(part => part.length > 0);
             
-            // مزامنة النماذج
-            await sequelize.sync({ alter: true });
-            console.log('✅ تم مزامنة النماذج مع قاعدة البيانات');
+            if (pathParts.length > 0) {
+                const lastPart = pathParts[pathParts.length - 1];
+                if (lastPart.length > 3) {
+                    return decodeURIComponent(lastPart).replace(/[-_]/g, ' ');
+                }
+            }
             
-            // إنشاء الإعدادات الافتراضية إذا لم تكن موجودة
-            await this.createDefaultSettings();
-            
-            console.log('🎉 تم تهيئة جميع النماذج بنجاح');
+            return hostname;
+        } catch {
+            return 'رابط غير معروف';
+        }
+    }
+
+    // ============================================
+    // 17. إعداد العلاقات بين النماذج
+    // ============================================
+    setupAssociations() {
+        const {
+            Admin,
+            WhatsAppSession,
+            CollectedLink,
+            Advertisement,
+            AutoPost,
+            AutoReply,
+            AutoJoin,
+            Broadcast,
+            Notification,
+            ActivityLog,
+            Archive,
+            LoginAttempt,
+            SystemLog,
+            Backup
+        } = this.models;
+
+        // علاقات المشرف
+        Admin.hasMany(WhatsAppSession, {
+            foreignKey: 'adminId',
+            as: 'sessions',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(Advertisement, {
+            foreignKey: 'adminId',
+            as: 'advertisements',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(AutoPost, {
+            foreignKey: 'adminId',
+            as: 'autoPosts',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(AutoReply, {
+            foreignKey: 'adminId',
+            as: 'autoReplies',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(AutoJoin, {
+            foreignKey: 'adminId',
+            as: 'autoJoins',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(Broadcast, {
+            foreignKey: 'adminId',
+            as: 'broadcasts',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(Notification, {
+            foreignKey: 'adminId',
+            as: 'notifications',
+            onDelete: 'CASCADE'
+        });
+        
+        Admin.hasMany(ActivityLog, {
+            foreignKey: 'adminId',
+            as: 'activityLogs',
+            onDelete: 'SET NULL'
+        });
+        
+        Admin.hasMany(LoginAttempt, {
+            foreignKey: 'telegramId',
+            sourceKey: 'telegramId',
+            as: 'loginAttempts',
+            onDelete: 'CASCADE'
+        });
+
+        // علاقات الجلسات
+        WhatsAppSession.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        WhatsAppSession.hasMany(CollectedLink, {
+            foreignKey: 'sessionId',
+            as: 'collectedLinks',
+            onDelete: 'CASCADE'
+        });
+        
+        WhatsAppSession.hasMany(AutoReply, {
+            foreignKey: 'sessionId',
+            as: 'autoReplies',
+            onDelete: 'CASCADE'
+        });
+        
+        WhatsAppSession.hasMany(AutoJoin, {
+            foreignKey: 'sessionId',
+            as: 'autoJoins',
+            onDelete: 'CASCADE'
+        });
+        
+        WhatsAppSession.hasMany(ActivityLog, {
+            foreignKey: 'sessionId',
+            as: 'activityLogs',
+            onDelete: 'SET NULL'
+        });
+
+        // علاقات الروابط
+        CollectedLink.belongsTo(WhatsAppSession, {
+            foreignKey: 'sessionId',
+            as: 'session'
+        });
+
+        // علاقات الإعلانات
+        Advertisement.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        Advertisement.hasMany(AutoPost, {
+            foreignKey: 'adId',
+            as: 'autoPosts',
+            onDelete: 'CASCADE'
+        });
+
+        // علاقات النشر التلقائي
+        AutoPost.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        AutoPost.belongsTo(Advertisement, {
+            foreignKey: 'adId',
+            as: 'advertisement'
+        });
+
+        // علاقات الردود التلقائية
+        AutoReply.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        AutoReply.belongsTo(WhatsAppSession, {
+            foreignKey: 'sessionId',
+            as: 'session'
+        });
+
+        // علاقات الانضمام التلقائي
+        AutoJoin.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        AutoJoin.belongsTo(WhatsAppSession, {
+            foreignKey: 'sessionId',
+            as: 'session'
+        });
+
+        // علاقات البث
+        Broadcast.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+
+        // علاقات الإشعارات
+        Notification.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+
+        // علاقات سجلات النشاطات
+        ActivityLog.belongsTo(Admin, {
+            foreignKey: 'adminId',
+            as: 'admin'
+        });
+        
+        ActivityLog.belongsTo(WhatsAppSession, {
+            foreignKey: 'sessionId',
+            as: 'session'
+        });
+
+        // علاقات الأرشفة
+        Archive.belongsTo(Admin, {
+            foreignKey: 'archivedBy',
+            targetKey: 'id',
+            as: 'archivedByAdmin'
+        });
+
+        // علاقات محاولات الدخول
+        LoginAttempt.belongsTo(Admin, {
+            foreignKey: 'telegramId',
+            targetKey: 'telegramId',
+            as: 'admin'
+        });
+
+        console.log('✅ تم إعداد جميع العلاقات');
+    }
+
+    // ============================================
+    // 18. الحصول على جميع النماذج
+    // ============================================
+    getModels() {
+        return this.models;
+    }
+
+    // ============================================
+    // 19. مزامنة النماذج مع قاعدة البيانات
+    // ============================================
+    async sync(options = {}) {
+        console.log('🔄 جاري مزامنة النماذج مع قاعدة البيانات...');
+        
+        const syncOptions = {
+            force: options.force || false,
+            alter: options.alter || true,
+            logging: options.logging || console.log
+        };
+
+        try {
+            // مزامنة جميع النماذج
+            for (const [name, model] of Object.entries(this.models)) {
+                console.log(`   🔄 مزامنة نموذج: ${name}`);
+                await model.sync(syncOptions);
+            }
+
+            console.log('✅ تمت مزامنة جميع النماذج بنجاح');
             return true;
-            
+
         } catch (error) {
-            console.error('❌ خطأ في تهيئة النماذج:', error);
+            console.error('❌ فشل مزامنة النماذج:', error);
             throw error;
         }
-    },
-    
-    // دالة لإنشاء الإعدادات الافتراضية
-    createDefaultSettings: async function() {
-        const defaultSettings = [
-            {
-                key: 'system.name',
-                value: 'WhatsApp Telegram Bot',
-                category: 'system',
-                description: 'اسم النظام',
-                isPublic: true,
-                editable: true
-            },
-            {
-                key: 'system.version',
-                value: '2.0.0',
-                category: 'system',
-                description: 'إصدار النظام',
-                isPublic: true,
-                editable: false
-            },
-            {
-                key: 'system.maintenance',
-                value: false,
-                category: 'system',
-                description: 'وضع الصيانة',
-                isPublic: true,
-                editable: true
-            },
-            {
-                key: 'whatsapp.max_sessions',
-                value: 10,
-                category: 'whatsapp',
-                description: 'الحد الأقصى للجلسات',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'whatsapp.auto_collect',
-                value: true,
-                category: 'whatsapp',
-                description: 'التجميع التلقائي للروابط',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'whatsapp.auto_reply',
-                value: true,
-                category: 'whatsapp',
-                description: 'الردود التلقائية',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'telegram.notifications',
-                value: true,
-                category: 'telegram',
-                description: 'الإشعارات في تليجرام',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'security.max_login_attempts',
-                value: 5,
-                category: 'security',
-                description: 'الحد الأقصى لمحاولات تسجيل الدخول',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'performance.cleanup_days',
-                value: 30,
-                category: 'performance',
-                description: 'عدد أيام الاحتفاظ بالسجلات',
-                isPublic: false,
-                editable: true
-            },
-            {
-                key: 'notifications.daily_report',
-                value: true,
-                category: 'notifications',
-                description: 'التقارير اليومية',
-                isPublic: false,
-                editable: true
-            }
-        ];
-        
-        for (const setting of defaultSettings) {
-            await SystemSetting.findOrCreate({
-                where: { key: setting.key },
-                defaults: setting
-            });
-        }
-    },
-    
-    // دالة لمسح جميع البيانات (للتنمية فقط)
-    clearAllData: async function() {
-        if (process.env.NODE_ENV === 'production') {
-            throw new Error('لا يمكن مسح البيانات في بيئة الإنتاج');
-        }
-        
-        console.log('⚠️ جاري مسح جميع البيانات...');
-        
-        const models = [
-            Blacklist,
-            SystemSetting,
-            DailyStat,
-            SystemLog,
-            Broadcast,
-            AutoJoin,
-            AutoReply,
-            AutoPost,
-            Advertisement,
-            CollectedLink,
-            WhatsAppSession,
-            Admin
-        ];
-        
-        for (const model of models) {
-            await model.destroy({ where: {}, force: true });
-            console.log(`✅ تم مسح ${model.name}`);
-        }
-        
-        console.log('🎉 تم مسح جميع البيانات بنجاح');
     }
-};
+
+    // ============================================
+    // 20. إنشاء بيانات تجريبية
+    // ============================================
+    async seedDemoData() {
+        console.log('🌱 جاري إنشاء بيانات تجريبية...');
+
+        try {
+            // إنشاء مشرف تجريبي
+            const admin = await this.models.Admin.create({
+                telegramId: '123456789',
+                username: 'demo_admin',
+                firstName: 'المشرف التجريبي',
+                permissions: ['admin', 'manage_sessions', 'manage_ads', 'manage_broadcasts', 'view_stats', 'manage_admins'],
+                isSuperAdmin: true
+            });
+
+            console.log(`✅ تم إنشاء المشرف: ${admin.firstName}`);
+
+            // إنشاء جلسة تجريبية
+            const session = await this.models.WhatsAppSession.create({
+                adminId: admin.id,
+                sessionId: `demo_session_${Date.now()}`,
+                phoneNumber: '+966501234567',
+                status: 'connected',
+                groupsCount: 5,
+                contactsCount: 10
+            });
+
+            console.log(`✅ تم إنشاء الجلسة: ${session.phoneNumber}`);
+
+            // إنشاء روابط تجريبية
+            const demoLinks = [
+                {
+                    url: 'https://chat.whatsapp.com/ABC123',
+                    type: 'whatsapp_group',
+                    title: 'مجموعة تجريبية 1',
+                    sessionId: session.id
+                },
+                {
+                    url: 'https://chat.whatsapp.com/DEF456',
+                    type: 'whatsapp_group',
+                    title: 'مجموعة تجريبية 2',
+                    sessionId: session.id
+                },
+                {
+                    url: 'https://t.me/demochannel',
+                    type: 'telegram',
+                    title: 'قناة تليجرام تجريبية',
+                    sessionId: session.id
+                }
+            ];
+
+            for (const linkData of demoLinks) {
+                await this.models.CollectedLink.create(linkData);
+            }
+
+            console.log(`✅ تم إنشاء ${demoLinks.length} رابط تجريبي`);
+
+            // إنشاء إعلان تجريبي
+            const ad = await this.models.Advertisement.create({
+                adminId: admin.id,
+                name: 'إعلان تجريبي',
+                type: 'text',
+                content: 'هذا إعلان تجريبي للنظام',
+                isActive: true
+            });
+
+            console.log(`✅ تم إنشاء الإعلان: ${ad.name}`);
+
+            // إنشاء رد تلقائي تجريبي
+            const reply = await this.models.AutoReply.create({
+                adminId: admin.id,
+                sessionId: session.id,
+                name: 'رد التحية',
+                triggerType: 'both',
+                trigger: 'مرحبا',
+                response: 'أهلاً وسهلاً بك! كيف يمكنني مساعدتك؟',
+                isActive: true
+            });
+
+            console.log(`✅ تم إنشاء الرد التلقائي: ${reply.name}`);
+
+            console.log('🎉 تم إنشاء جميع البيانات التجريبية بنجاح');
+            return { admin, session, ad, reply };
+
+        } catch (error) {
+            console.error('❌ فشل إنشاء البيانات التجريبية:', error);
+            throw error;
+        }
+    }
+}
+
+// ============================================
+// 21. التصدير
+// ============================================
+module.exports = WhatsAppModels;
